@@ -1,0 +1,5 @@
+azure-identity
+pandas
+requests
+azure-mgmt-postgresqlflexibleservers
+psycopg2-binary

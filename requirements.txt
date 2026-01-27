@@ -1,0 +1,4 @@
+azure-identity
+pandas
+requests
+pyodbc

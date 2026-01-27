@@ -1,0 +1,11 @@
+# Azure Functions dependencies
+azure-functions>=1.17.0
+
+# Azure Identity for authentication (RBAC)
+azure-identity>=1.15.0
+
+# HTTP requests for Content Understanding API
+requests>=2.31.0
+
+# PostgreSQL database connection
+psycopg2-binary>=2.9.9
