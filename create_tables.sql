@@ -40,7 +40,6 @@ CREATE INDEX IX_parties_contract_id ON parties(contract_id);
 CREATE INDEX IX_clauses_contract_id ON clauses(contract_id);
 CREATE INDEX IX_contracts_created_at ON contracts(created_at);
 
-
 -- ============================================================================
 -- Grant permissions to the Function App's Managed Identity
 -- Replace <function-app-name> with your actual Function App name
@@ -49,6 +48,6 @@ CREATE INDEX IX_contracts_created_at ON contracts(created_at);
 -- First, create the user from the managed identity
 -- CREATE USER [<function-app-name>] FROM EXTERNAL PROVIDER;
 
--- Grant read/write permissions
+-- -- Grant read/write permissions
 -- ALTER ROLE db_datareader ADD MEMBER [<function-app-name>];
 -- ALTER ROLE db_datawriter ADD MEMBER [<function-app-name>];
