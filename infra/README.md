@@ -16,9 +16,10 @@ Bicep templates for deploying the complete Contract Analysis solution to Azure.
                               ▼                          ▼                          │
                    ┌─────────────────┐        ┌─────────────────┐                   │
                    │  Azure AI       │        │   Azure SQL     │                   │
-                   │  Services       │        │   Database      │                   │
+                   │  Foundry        │        │   Database      │                   │
                    │  (Content       │        │                 │                   │
                    │  Understanding) │        │                 │                   │
+                   │  *Manual Setup* │        │                 │                   │
                    └─────────────────┘        └─────────────────┘                   │
                                                                                     │
                    ┌─────────────────┐        ┌─────────────────┐                   │
@@ -36,11 +37,12 @@ Bicep templates for deploying the complete Contract Analysis solution to Azure.
 | **SharePoint Connection** | API connection for SharePoint Online (requires OAuth)    |
 | **Function App**          | Python function for contract analysis (Consumption plan) |
 | **App Service Plan**      | Consumption tier for Function App                        |
-| **Azure AI Services**     | Content Understanding for document analysis              |
 | **Azure SQL Server**      | Managed SQL instance                                     |
 | **Azure SQL Database**    | Contract storage (Basic tier)                            |
 | **Log Analytics**         | Centralized logging                                      |
 | **Application Insights**  | Function App monitoring                                  |
+
+> **Note:** (Content Understanding) must be created manually in the same resource group after deployment.
 
 ## Permissions Configured
 
@@ -48,7 +50,7 @@ The deployment automatically configures:
 
 | Principal          | Target          | Role                               |
 | ------------------ | --------------- | ---------------------------------- |
-| Function App (MSI) | AI Services     | Cognitive Services User            |
+| Function App (MSI) | Resource Group  | Cognitive Services User            |
 | Function App (MSI) | Storage Account | Storage Blob/Queue/Table/File Data |
 
 > **Note:** The SharePoint connection requires interactive OAuth consent after deployment.
@@ -93,7 +95,6 @@ If you cannot grant subscription-level access, assign these roles at the resourc
 | Create Function App    | `Microsoft.Web/sites/write`, `Microsoft.Web/serverfarms/write`         |                                         |
 | Create Logic App       | `Microsoft.Logic/workflows/write`                                      |                                         |
 | Create SQL Server/DB   | `Microsoft.Sql/servers/write`, `Microsoft.Sql/servers/databases/write` |                                         |
-| Create AI Services     | `Microsoft.CognitiveServices/accounts/write`                           |                                         |
 | Create Log Analytics   | `Microsoft.OperationalInsights/workspaces/write`                       |                                         |
 | Create App Insights    | `Microsoft.Insights/components/write`                                  |                                         |
 | Assign RBAC Roles      | `Microsoft.Authorization/roleAssignments/write`                        | For managed identity permissions        |
@@ -151,7 +152,6 @@ az deployment group create \
   --parameters sqlAdminPassword='YourSecurePassword123!' \
   --parameters sqlAadAdminObjectId='your-object-id' \
   --parameters sqlAadAdminDisplayName='your@email.com' \
-  --parameters contentUnderstandingAnalyzerId='contract-analyzer' \
   --parameters sharePointSiteUrl='https://contoso.sharepoint.com/sites/ContractAI' \
   --parameters sharePointLibraryId='your-library-guid'
 
@@ -184,10 +184,13 @@ ALTER ROLE db_datawriter ADD MEMBER [<function-app-name>];
 
 1. Go to Azure AI Foundry → Content Understanding
 2. Create a new analyzer with your contract schema
-3. Note the Analyzer ID
-4. Update the Function App setting:
+3. Note the **Project Endpoint** (e.g., `https://<project>.services.ai.azure.com`)
+4. Note the **Analyzer ID** you create
+5. Update the Function App setting:
    ```bash
-   az functionapp config appsettings set -g contract-analysis-rg -n <function-app-name> --settings CONTENT_UNDERSTANDING_ANALYZER_ID=<your-analyzer-id>
+   az functionapp config appsettings set -g contract-analysis-rg -n <function-app-name> \
+     --settings CONTENT_UNDERSTANDING_ENDPOINT=<your-foundry-endpoint> \
+     CONTENT_UNDERSTANDING_ANALYZER_ID=<your-analyzer-id>
    ```
 
 ### 3. Authorize SharePoint Connection
@@ -220,24 +223,23 @@ The `deploy.sh` script automates the deployment:
 
 **Remaining manual steps after running the script:**
 
+- Create Content Understanding analyzer and update Function App settings
 - Authorize the SharePoint connection in Azure Portal
-- Create the Content Understanding analyzer in Azure Portal
 - Enable the Logic App
 
 ## Parameters
 
-| Parameter                        | Description                           | Required | Default                 |
-| -------------------------------- | ------------------------------------- | -------- | ----------------------- |
-| `baseName`                       | Base name for resources (3-15 chars)  | Yes      | -                       |
-| `environment`                    | Environment name (dev/staging/prod)   | No       | dev                     |
-| `location`                       | Azure region                          | No       | Resource group location |
-| `sqlAdminUsername`               | SQL admin username                    | No       | sqladmin                |
-| `sqlAdminPassword`               | SQL admin password                    | Yes      | -                       |
-| `sqlAadAdminObjectId`            | Azure AD admin Object ID              | Yes      | -                       |
-| `sqlAadAdminDisplayName`         | Azure AD admin display name           | Yes      | -                       |
-| `contentUnderstandingAnalyzerId` | Analyzer ID                           | Yes      | -                       |
-| `sharePointSiteUrl`              | SharePoint site URL                   | Yes      | -                       |
-| `sharePointLibraryId`            | SharePoint document library ID (GUID) | Yes      | -                       |
+| Parameter                | Description                           | Required | Default                 |
+| ------------------------ | ------------------------------------- | -------- | ----------------------- |
+| `baseName`               | Base name for resources (3-15 chars)  | Yes      | -                       |
+| `environment`            | Environment name (dev/staging/prod)   | No       | dev                     |
+| `location`               | Azure region                          | No       | Resource group location |
+| `sqlAdminUsername`       | SQL admin username                    | No       | sqladmin                |
+| `sqlAdminPassword`       | SQL admin password                    | Yes      | -                       |
+| `sqlAadAdminObjectId`    | Azure AD admin Object ID              | Yes      | -                       |
+| `sqlAadAdminDisplayName` | Azure AD admin display name           | Yes      | -                       |
+| `sharePointSiteUrl`      | SharePoint site URL                   | Yes      | -                       |
+| `sharePointLibraryId`    | SharePoint document library ID (GUID) | Yes      | -                       |
 
 ## Finding Your SharePoint Library ID
 
@@ -268,7 +270,6 @@ Edit the module files to change resource SKUs:
 
 - **SQL Database**: `modules/sql.bicep` - Change `sku.name` from 'Basic' to 'Standard' etc.
 - **Function App**: `modules/function-app.bicep` - Change to Premium plan for more resources
-- **AI Services**: `modules/ai-services.bicep` - Already using S0
 
 ## Troubleshooting
 

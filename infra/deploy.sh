@@ -53,7 +53,6 @@ az deployment group create \
   --parameters environment="$ENVIRONMENT" \
   --parameters sqlAadAdminObjectId="$AAD_OBJECT_ID" \
   --parameters sqlAadAdminDisplayName="$AAD_DISPLAY_NAME" \
-  --parameters contentUnderstandingAnalyzerId="$ANALYZER_ID" \
   --parameters sharePointSiteUrl="$SHAREPOINT_SITE_URL" \
   --parameters sharePointLibraryId="$SHAREPOINT_LIBRARY_ID" \
   --output none
@@ -142,11 +141,16 @@ echo "      CREATE USER [$FUNCTION_APP_NAME] FROM EXTERNAL PROVIDER;"
 echo "      ALTER ROLE db_datareader ADD MEMBER [$FUNCTION_APP_NAME];"
 echo "      ALTER ROLE db_datawriter ADD MEMBER [$FUNCTION_APP_NAME];"
 echo ""
-echo "2. Create the Content Understanding analyzer in Azure AI Foundry"
-echo "   - Go to: AI Foundry → Content Understanding → Create Analyzer"
-echo "   - Note the Analyzer ID you create"
-echo "   - Update Function App setting:"
-echo "     az functionapp config appsettings set -g $RESOURCE_GROUP -n $FUNCTION_APP_NAME --settings CONTENT_UNDERSTANDING_ANALYZER_ID=<your-analyzer-id>"
+echo "2. Create Azure AI Foundry resource and Content Understanding analyzer"
+echo "   a. Go to: Azure Portal → Create Resource → Azure AI Foundry"
+echo "   b. Create in the SAME resource group: $RESOURCE_GROUP"
+echo "   c. In the project, go to Content Understanding → Create Analyzer"
+echo "   d. Note the Project Endpoint (e.g., https://<project>.services.ai.azure.com)"
+echo "   e. Note the Analyzer ID you create"
+echo "   f. Update Function App settings:"
+echo "      az functionapp config appsettings set -g $RESOURCE_GROUP -n $FUNCTION_APP_NAME \\"
+echo "        --settings CONTENT_UNDERSTANDING_ENDPOINT=<your-foundry-endpoint> \\"
+echo "        CONTENT_UNDERSTANDING_ANALYZER_ID=<your-analyzer-id>"
 echo ""
 echo "3. Authorize SharePoint Connection"
 echo "   - Go to: Azure Portal → Resource Group → API Connections → $SHAREPOINT_CONNECTION"

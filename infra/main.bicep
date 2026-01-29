@@ -31,9 +31,6 @@ param sqlAadAdminObjectId string
 @description('Azure AD display name of the SQL Admin user')
 param sqlAadAdminDisplayName string
 
-@description('Content Understanding Analyzer ID (create this in Azure portal first)')
-param contentUnderstandingAnalyzerId string
-
 @description('SharePoint site URL (e.g., https://contoso.sharepoint.com/sites/ContractAI)')
 param sharePointSiteUrl string
 
@@ -61,7 +58,6 @@ var appServicePlanName = '${resourcePrefix}-asp'
 var logicAppName = '${resourcePrefix}-logic'
 var sqlServerName = '${resourcePrefix}-sql-${uniqueSuffix}'
 var sqlDatabaseName = 'contractsdb'
-var aiServicesName = '${resourcePrefix}-ai-${uniqueSuffix}'
 var logAnalyticsName = '${resourcePrefix}-logs'
 var appInsightsName = '${resourcePrefix}-insights'
 
@@ -90,15 +86,9 @@ module storage 'modules/storage.bicep' = {
   }
 }
 
-// Azure AI Services (Content Understanding)
-module aiServices 'modules/ai-services.bicep' = {
-  name: 'ai-services-deployment'
-  params: {
-    location: location
-    aiServicesName: aiServicesName
-    tags: tags
-  }
-}
+// NOTE: Azure AI Foundry (Content Understanding) must be created manually in Azure Portal.
+// The Function App is granted Cognitive Services User role at the RG level,
+// so any AI Foundry resource created here will be accessible.
 
 // Azure SQL Database (Azure AD-only authentication)
 module sql 'modules/sql.bicep' = {
@@ -122,8 +112,6 @@ module functionApp 'modules/function-app.bicep' = {
     appServicePlanName: appServicePlanName
     storageAccountName: storage.outputs.storageAccountName
     appInsightsConnectionString: monitoring.outputs.appInsightsConnectionString
-    contentUnderstandingEndpoint: aiServices.outputs.endpoint
-    contentUnderstandingAnalyzerId: contentUnderstandingAnalyzerId
     sqlServerName: sql.outputs.sqlServerName
     sqlDatabaseName: sql.outputs.sqlDatabaseName
     tags: tags
@@ -148,14 +136,14 @@ module logicApp 'modules/logic-app-sharepoint.bicep' = {
 // Role Assignments (Permissions)
 // ============================================================================
 
-// Grant Function App access to Cognitive Services (Content Understanding)
+// Grant Function App Cognitive Services User role at Resource Group level
+// This allows access to any AI Foundry/Cognitive Services resource in the RG
 module functionToCognitiveServices 'modules/role-assignment.bicep' = {
   name: 'func-to-cognitive-role'
   params: {
     principalId: functionApp.outputs.functionAppPrincipalId
     roleDefinitionId: 'a97b65f3-24c7-4388-baec-2e87135dc908' // Cognitive Services User
     principalType: 'ServicePrincipal'
-    resourceId: aiServices.outputs.aiServicesId
   }
 }
 
@@ -221,7 +209,6 @@ output sharePointConnectionName string = logicApp.outputs.sharePointConnectionNa
 output sqlServerFqdn string = sql.outputs.sqlServerFqdn
 output sqlDatabaseName string = sql.outputs.sqlDatabaseName
 output storageAccountName string = storage.outputs.storageAccountName
-output aiServicesEndpoint string = aiServices.outputs.endpoint
 output functionAppPrincipalId string = functionApp.outputs.functionAppPrincipalId
 
 // Post-deployment instructions

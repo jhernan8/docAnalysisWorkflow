@@ -33,6 +33,9 @@ def analyze_and_store(req: func.HttpRequest) -> func.HttpResponse:
     try:
         # Get Content Understanding configuration
         base_endpoint = os.environ["CONTENT_UNDERSTANDING_ENDPOINT"]
+        # Ensure endpoint has https:// prefix
+        if not base_endpoint.startswith("https://") and not base_endpoint.startswith("http://"):
+            base_endpoint = f"https://{base_endpoint}"
         api_version = os.environ.get("CONTENT_UNDERSTANDING_API_VERSION", "2025-11-01")
         analyzer_id = os.environ["CONTENT_UNDERSTANDING_ANALYZER_ID"]
 

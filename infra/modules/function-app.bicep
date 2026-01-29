@@ -8,8 +8,6 @@ param functionAppName string
 param appServicePlanName string
 param storageAccountName string
 param appInsightsConnectionString string
-param contentUnderstandingEndpoint string
-param contentUnderstandingAnalyzerId string
 param sqlServerName string
 param sqlDatabaseName string
 param tags object
@@ -87,15 +85,15 @@ resource functionApp 'Microsoft.Web/sites@2023-12-01' = {
           value: appInsightsConnectionString
         }
         // ============================================
-        // Content Understanding configuration
+        // Content Understanding (set manually after AI Foundry creation)
         // ============================================
         {
           name: 'CONTENT_UNDERSTANDING_ENDPOINT'
-          value: contentUnderstandingEndpoint
+          value: 'PLACEHOLDER_SET_AFTER_FOUNDRY_CREATION'
         }
         {
           name: 'CONTENT_UNDERSTANDING_ANALYZER_ID'
-          value: contentUnderstandingAnalyzerId
+          value: 'PLACEHOLDER_SET_AFTER_FOUNDRY_CREATION'
         }
         {
           name: 'CONTENT_UNDERSTANDING_API_VERSION'
