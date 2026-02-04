@@ -1,0 +1,30 @@
+{
+  "@odata.context": "https://cntrct-srch-dev-search-woyj6cue5no22.search.windows.net/$metadata#indexers/$entity",
+  "@odata.etag": "\"0x8DE638AADAE5860\"",
+  "name": "rag-1770147499308-indexer",
+  "description": null,
+  "dataSourceName": "rag-1770147499308-datasource",
+  "skillsetName": "rag-1770147499308-skillset",
+  "targetIndexName": "rag-1770147499308",
+  "disabled": null,
+  "schedule": null,
+  "parameters": {
+    "batchSize": null,
+    "maxFailedItems": null,
+    "maxFailedItemsPerBatch": null,
+    "configuration": {
+      "parsingMode": "default",
+      "allowSkillsetToReadFileData": true
+    }
+  },
+  "fieldMappings": [
+    {
+      "sourceFieldName": "metadata_storage_name",
+      "targetFieldName": "title",
+      "mappingFunction": null
+    }
+  ],
+  "outputFieldMappings": [],
+  "cache": null,
+  "encryptionKey": null
+}
