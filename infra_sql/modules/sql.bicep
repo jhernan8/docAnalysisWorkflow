@@ -10,6 +10,9 @@ param sqlAadAdminObjectId string
 param sqlAadAdminDisplayName string
 param tags object
 
+@description('Public network access setting')
+param publicNetworkAccess string = 'Enabled'
+
 // SQL Server with Azure AD-only authentication
 resource sqlServer 'Microsoft.Sql/servers@2023-05-01-preview' = {
   name: sqlServerName
@@ -18,7 +21,7 @@ resource sqlServer 'Microsoft.Sql/servers@2023-05-01-preview' = {
   properties: {
     version: '12.0'
     minimalTlsVersion: '1.2'
-    publicNetworkAccess: 'Enabled'
+    publicNetworkAccess: publicNetworkAccess
     administrators: {
       administratorType: 'ActiveDirectory'
       principalType: 'User'
@@ -48,8 +51,8 @@ resource sqlDatabase 'Microsoft.Sql/servers/databases@2023-05-01-preview' = {
   }
 }
 
-// Allow Azure services to access (required for Function App)
-resource allowAzureServices 'Microsoft.Sql/servers/firewallRules@2023-05-01-preview' = {
+// Allow Azure services to access (only when public access is enabled)
+resource allowAzureServices 'Microsoft.Sql/servers/firewallRules@2023-05-01-preview' = if (publicNetworkAccess == 'Enabled') {
   parent: sqlServer
   name: 'AllowAllWindowsAzureIps'
   properties: {

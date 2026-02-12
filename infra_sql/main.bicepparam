@@ -18,18 +18,27 @@ param sqlAadAdminObjectId = '' // Your Azure AD Object ID
 // Run: az ad signed-in-user show --query userPrincipalName -o tsv
 param sqlAadAdminDisplayName = '' // Your email/UPN
 
-// Content Understanding Analyzer ID
-// Create this in Azure Portal under your AI Services resource
-param contentUnderstandingAnalyzerId = 'contract-analyzer'
-
 // SharePoint Configuration
-// Site URL: The full URL to your SharePoint site
 param sharePointSiteUrl = '' // e.g., 'https://contoso.sharepoint.com/sites/ContractAI'
-
-// Library ID: The GUID of the document library where contracts are uploaded
-// To find this: Go to Library Settings -> Look at the URL for the List parameter
-// Or use: SharePoint REST API /_api/web/lists?$filter=BaseTemplate eq 101
 param sharePointLibraryId = '' // e.g., '0c082b7c-8834-480c-8b30-47ba73e8562c'
 
-// Optional: Override location (defaults to resource group location)
+// ============================================================================
+// Networking Configuration
+// ============================================================================
+
+// Existing VNet
+param vnetName = 'cai-a1-tst-vnet-spoke01'
+param vnetResourceGroupName = '' // Resource group containing the VNet
+
+// Subnet address ranges (must not overlap with existing subnets in the VNet)
+param privateEndpointSubnetAddressPrefix = '' // e.g., '10.0.4.0/24'
+param vnetIntegrationSubnetAddressPrefix = '' // e.g., '10.0.5.0/24'
+param logicAppSubnetAddressPrefix = ''        // e.g., '10.0.6.0/24'
+
+// Private DNS Zones (deployed in a different subscription)
+param dnsZoneSubscriptionId = '' // Subscription ID where DNS Zones live
+param dnsZoneResourceGroupName = '' // Resource group containing DNS Zones
+
+// Optional: Override locations (defaults to resource group location)
 // param location = 'eastus'
+// param sqlLocation = 'centralus'

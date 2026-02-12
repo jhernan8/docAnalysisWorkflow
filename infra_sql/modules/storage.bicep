@@ -6,6 +6,9 @@ param location string
 param storageAccountName string
 param tags object
 
+@description('Public network access setting')
+param publicNetworkAccess string = 'Enabled'
+
 // Storage Account
 resource storageAccount 'Microsoft.Storage/storageAccounts@2023-01-01' = {
   name: storageAccountName
@@ -20,6 +23,10 @@ resource storageAccount 'Microsoft.Storage/storageAccounts@2023-01-01' = {
     minimumTlsVersion: 'TLS1_2'
     allowBlobPublicAccess: false
     accessTier: 'Hot'
+    publicNetworkAccess: publicNetworkAccess
+    networkAcls: {
+      defaultAction: publicNetworkAccess == 'Disabled' ? 'Deny' : 'Allow'
+    }
   }
 }
 

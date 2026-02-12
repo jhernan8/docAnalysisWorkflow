@@ -1,6 +1,6 @@
 # Infrastructure as Code - Contract Analysis Solution
 
-Bicep templates for deploying the complete Contract Analysis solution to Azure.
+Bicep templates for deploying the complete Contract Analysis solution to Azure with private endpoints, VNet integration, and Logic App Standard.
 
 ## Architecture
 
@@ -28,19 +28,46 @@ Bicep templates for deploying the complete Contract Analysis solution to Azure.
                    └─────────────────┘        └─────────────────┘
 ```
 
+### Private Endpoint Topology
+
+```
+┌────────────────────────────────────────────────────────────────┐
+│  Existing VNet (cai-a1-tst-vnet-spoke01)                       │
+│                                                                │
+│  ┌──────────────────────────┐  ┌─────────────────────────────┐ │
+│  │ snet-private-endpoints   │  │ snet-func-integration       │ │
+│  │                          │  │ (delegated: Web/serverFarms) │ │
+│  │  PE: Storage (blob)      │  │                             │ │
+│  │  PE: Storage (file)      │  │  Function App outbound ────┼─┤
+│  │  PE: Storage (queue)     │  │  VNet integration           │ │
+│  │  PE: Storage (table)     │  └─────────────────────────────┘ │
+│  │  PE: Azure SQL Server    │                                  │
+│  │  PE: Function App        │  ┌─────────────────────────────┐ │
+│  │  PE: Logic App Standard  │  │ snet-logic-integration       │ │
+│  └──────────────────────────┘  │ (delegated: Web/serverFarms) │ │
+│                                  │                             │ │
+│                                  │  Logic App outbound ──────┼─┤
+│                                  │  VNet integration           │ │
+│                                  └─────────────────────────────┘ │
+└────────────────────────────────────────────────────────────────┘
+         │
+         ▼
+  Private DNS Zones (cross-subscription)
+```
+
 ## Resources Deployed
 
-| Resource                  | Description                                              |
-| ------------------------- | -------------------------------------------------------- |
-| **Storage Account**       | Function App storage (managed identity)                  |
-| **Logic App**             | Triggers on SharePoint file upload, calls Function App   |
-| **SharePoint Connection** | API connection for SharePoint Online (requires OAuth)    |
-| **Function App**          | Python function for contract analysis (Consumption plan) |
-| **App Service Plan**      | Consumption tier for Function App                        |
-| **Azure SQL Server**      | Managed SQL instance                                     |
-| **Azure SQL Database**    | Contract storage (Basic tier)                            |
-| **Log Analytics**         | Centralized logging                                      |
-| **Application Insights**  | Function App monitoring                                  |
+| Resource                  | Description                                                           |
+| ------------------------- | --------------------------------------------------------------------- |
+| **Storage Account**       | Function App storage (managed identity)                               |
+| **Logic App**             | Standard tier; triggers on SharePoint file upload, calls Function App |
+| **SharePoint Connection** | API connection for SharePoint Online (requires OAuth)                 |
+| **Function App**          | Python function for contract analysis (Flex Consumption plan)         |
+| **App Service Plan**      | Flex Consumption for Function App, WS1 for Logic App Standard         |
+| **Azure SQL Server**      | Managed SQL instance                                                  |
+| **Azure SQL Database**    | Contract storage (Basic tier)                                         |
+| **Log Analytics**         | Centralized logging                                                   |
+| **Application Insights**  | Function App monitoring                                               |
 
 > **Note:** (Content Understanding) must be created manually in the same resource group after deployment.
 
@@ -52,6 +79,7 @@ The deployment automatically configures:
 | ------------------ | --------------- | ---------------------------------- |
 | Function App (MSI) | Resource Group  | Cognitive Services User            |
 | Function App (MSI) | Storage Account | Storage Blob/Queue/Table/File Data |
+| Logic App (MSI)    | Storage Account | Storage Blob/Queue/Table/File Data |
 
 > **Note:** The SharePoint connection requires interactive OAuth consent after deployment.
 
@@ -128,8 +156,10 @@ az ad signed-in-user show --query id -o tsv
 
 ### Option 1: Using the deploy script
 
+Requires an existing VNet and Private DNS Zones (can be in a different subscription).
+
 ```bash
-cd infra
+cd infra_sql
 chmod +x deploy.sh
 ./deploy.sh
 ```
@@ -149,11 +179,17 @@ az deployment group create \
   --template-file main.bicep \
   --parameters baseName=contracts \
   --parameters environment=dev \
-  --parameters sqlAdminPassword='YourSecurePassword123!' \
   --parameters sqlAadAdminObjectId='your-object-id' \
   --parameters sqlAadAdminDisplayName='your@email.com' \
   --parameters sharePointSiteUrl='https://contoso.sharepoint.com/sites/ContractAI' \
-  --parameters sharePointLibraryId='your-library-guid'
+  --parameters sharePointLibraryId='your-library-guid' \
+  --parameters vnetName='cai-a1-tst-vnet-spoke01' \
+  --parameters vnetResourceGroupName='your-vnet-rg' \
+  --parameters privateEndpointSubnetAddressPrefix='10.0.4.0/24' \
+  --parameters vnetIntegrationSubnetAddressPrefix='10.0.5.0/24' \
+  --parameters logicAppSubnetAddressPrefix='10.0.6.0/24' \
+  --parameters dnsZoneSubscriptionId='your-dns-sub-id' \
+  --parameters dnsZoneResourceGroupName='your-dns-rg'
 
 # 4. Deploy function code
 cd ../azure_function_sql
@@ -201,25 +237,23 @@ ALTER ROLE db_datawriter ADD MEMBER [<function-app-name>];
 4. Click "Authorize" and sign in with your SharePoint account
 5. Click "Save"
 
-### 4. Enable Logic App
-
-1. Go to Azure Portal → Logic Apps
-2. Select your Logic App
-3. Click "Enable"
-
-### 5. Test the Solution
+### 4. Test the Solution
 
 Upload a PDF contract to your SharePoint document library.
 
 ## What the Deploy Script Does
 
-The `deploy.sh` script automates the deployment:
+The `deploy.sh` script automates the full deployment:
 
 1. ✅ Creates the resource group
 2. ✅ Deploys all Azure resources via Bicep
-3. ✅ Deploys the Function App code
-4. ✅ Configures Logic App with Function key
-5. ✅ Configures all RBAC permissions
+3. ✅ Creates PE + VNet integration subnets on existing VNet
+4. ✅ Deploys private endpoints (Storage blob/file/queue/table, SQL, Function App, Logic App)
+5. ✅ Registers endpoints with cross-subscription Private DNS Zones
+6. ✅ Disables public network access on Storage, SQL, Function App, and Logic App
+7. ✅ Deploys the Function App code (temporarily enables storage public access)
+8. ✅ Deploys Logic App Standard workflow definition via zip deploy
+9. ✅ Configures all RBAC permissions
 
 **Remaining manual steps after running the script:**
 
@@ -229,17 +263,23 @@ The `deploy.sh` script automates the deployment:
 
 ## Parameters
 
-| Parameter                | Description                           | Required | Default                 |
-| ------------------------ | ------------------------------------- | -------- | ----------------------- |
-| `baseName`               | Base name for resources (3-15 chars)  | Yes      | -                       |
-| `environment`            | Environment name (dev/staging/prod)   | No       | dev                     |
-| `location`               | Azure region                          | No       | Resource group location |
-| `sqlAdminUsername`       | SQL admin username                    | No       | sqladmin                |
-| `sqlAdminPassword`       | SQL admin password                    | Yes      | -                       |
-| `sqlAadAdminObjectId`    | Azure AD admin Object ID              | Yes      | -                       |
-| `sqlAadAdminDisplayName` | Azure AD admin display name           | Yes      | -                       |
-| `sharePointSiteUrl`      | SharePoint site URL                   | Yes      | -                       |
-| `sharePointLibraryId`    | SharePoint document library ID (GUID) | Yes      | -                       |
+| Parameter                            | Description                           | Required | Default                 |
+| ------------------------------------ | ------------------------------------- | -------- | ----------------------- |
+| `baseName`                           | Base name for resources (3-15 chars)  | Yes      | -                       |
+| `environment`                        | Environment name (dev/staging/prod)   | No       | dev                     |
+| `location`                           | Azure region                          | No       | Resource group location |
+| `sqlLocation`                        | Azure region for SQL                  | No       | centralus               |
+| `sqlAadAdminObjectId`                | Azure AD admin Object ID              | Yes      | -                       |
+| `sqlAadAdminDisplayName`             | Azure AD admin display name           | Yes      | -                       |
+| `sharePointSiteUrl`                  | SharePoint site URL                   | Yes      | -                       |
+| `sharePointLibraryId`                | SharePoint document library ID (GUID) | Yes      | -                       |
+| `vnetName`                           | Name of existing VNet                 | Yes      | -                       |
+| `vnetResourceGroupName`              | Resource group of the VNet            | Yes      | -                       |
+| `privateEndpointSubnetAddressPrefix` | CIDR for PE subnet                    | Yes      | -                       |
+| `vnetIntegrationSubnetAddressPrefix` | CIDR for Function App outbound subnet | Yes      | -                       |
+| `logicAppSubnetAddressPrefix`        | CIDR for Logic App outbound subnet    | Yes      | -                       |
+| `dnsZoneSubscriptionId`              | Subscription ID for Private DNS Zones | Yes      | -                       |
+| `dnsZoneResourceGroupName`           | Resource group for Private DNS Zones  | Yes      | -                       |
 
 ## Finding Your SharePoint Library ID
 
@@ -277,20 +317,41 @@ Edit the module files to change resource SKUs:
 
 1. Verify the managed identity exists: `az functionapp identity show --name <func-name> --resource-group <rg>`
 2. Check the SQL user was created: `SELECT name FROM sys.database_principals WHERE type = 'E'`
-3. Verify firewall allows Azure services: Check SQL Server → Networking
+3. Verify the SQL private endpoint is healthy and DNS resolves correctly
 
 ### Logic App trigger not firing
 
-1. Ensure Logic App is enabled
-2. Check the blob connection is authorized
-3. Verify files are in the `/contracts` container
-4. Check Logic App run history for errors
+1. Check the SharePoint connection is authorized
+2. Verify files are in the correct SharePoint library
+3. Check Logic App run history for errors
+4. Ensure the Logic App workflow was deployed (`az logicapp deployment source config-zip`)
 
 ### Content Understanding errors
 
 1. Verify the analyzer exists and is published
 2. Check the endpoint and analyzer ID in Function App settings
 3. Ensure the Function App has Cognitive Services User role
+
+### Private endpoint DNS resolution issues
+
+1. Verify all Private DNS Zones have VNet links to your spoke VNet
+2. Required zones: `privatelink.blob.core.windows.net`, `privatelink.file.core.windows.net`, `privatelink.queue.core.windows.net`, `privatelink.table.core.windows.net`, `privatelink.database.windows.net`, `privatelink.azurewebsites.net`
+3. Test resolution from a VM in the VNet: `nslookup <storage-account>.blob.core.windows.net`
+4. The result should return a private IP (e.g., `10.x.x.x`), not a public IP
+
+### Function App deployment fails
+
+The deploy script temporarily enables public access on the storage account for code deployment. If it fails mid-way, re-enable public access manually:
+
+```bash
+az storage account update -g <rg> -n <storage> --public-network-access Enabled
+```
+
+After deploying, disable it again:
+
+```bash
+az storage account update -g <rg> -n <storage> --public-network-access Disabled
+```
 
 ## Clean Up
 

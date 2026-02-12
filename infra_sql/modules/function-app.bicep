@@ -12,6 +12,12 @@ param sqlServerName string
 param sqlDatabaseName string
 param tags object
 
+@description('Subnet ID for VNet integration (outbound). Leave empty to skip VNet integration.')
+param virtualNetworkSubnetId string = ''
+
+@description('Public network access setting')
+param publicNetworkAccess string = 'Enabled'
+
 // Flex Consumption Plan (supports managed identity for storage)
 resource appServicePlan 'Microsoft.Web/serverfarms@2023-12-01' = {
   name: appServicePlanName
@@ -40,6 +46,9 @@ resource functionApp 'Microsoft.Web/sites@2023-12-01' = {
     serverFarmId: appServicePlan.id
     reserved: true
     httpsOnly: true
+    publicNetworkAccess: publicNetworkAccess
+    virtualNetworkSubnetId: !empty(virtualNetworkSubnetId) ? virtualNetworkSubnetId : null
+    vnetRouteAllEnabled: !empty(virtualNetworkSubnetId)
     functionAppConfig: {
       deployment: {
         storage: {
