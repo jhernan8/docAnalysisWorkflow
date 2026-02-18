@@ -161,111 +161,91 @@ $FUNC_HOSTNAME = (az deployment group show -g $RESOURCE_GROUP -n main --query "p
 $SP_SITE_URL = $SHAREPOINT_SITE_URL
 $SP_LIBRARY_ID = $SHAREPOINT_LIBRARY_ID
 
-# Create connections.json
-$connectionsJson = @'
-{
-  "managedApiConnections": {
-    "sharepointonline": {
-      "api": {
-        "id": "__MANAGED_API_ID__"
-      },
-      "connection": {
-        "id": "__SP_CONNECTION_ID__"
-      },
-      "connectionRuntimeUrl": "__SP_CONNECTION_RUNTIME_URL__",
-      "authentication": {
-        "type": "ManagedServiceIdentity"
-      }
-    }
-  }
-}
-'@
-$connectionsJson = $connectionsJson -replace '__MANAGED_API_ID__', $MANAGED_API_ID
-$connectionsJson = $connectionsJson -replace '__SP_CONNECTION_ID__', $SP_CONNECTION_ID
-$connectionsJson = $connectionsJson -replace '__SP_CONNECTION_RUNTIME_URL__', $SP_CONNECTION_RUNTIME_URL
-$connectionsJson | Set-Content -Path (Join-Path $WORKFLOW_DIR "connections.json") -Encoding UTF8
-
-# Create workflow.json for the contract-trigger workflow
-$workflowJson = @'
-{
-  "definition": {
-    "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
-    "contentVersion": "1.0.0.0",
-    "parameters": {
-      "$connections": {
-        "defaultValue": {},
-        "type": "Object"
-      }
-    },
-    "triggers": {
-      "When_a_file_is_created_properties_only": {
-        "type": "ApiConnection",
-        "inputs": {
-          "host": {
-            "connection": {
-              "referenceName": "sharepointonline"
-            }
-          },
-          "method": "get",
-          "path": "/datasets/@{encodeURIComponent(encodeURIComponent('__SP_SITE_URL__'))}/tables/@{encodeURIComponent(encodeURIComponent('__SP_LIBRARY_ID__'))}/onnewfileitems"
-        },
-        "recurrence": {
-          "frequency": "Minute",
-          "interval": 1
-        },
-        "splitOn": "@triggerBody()?['value']"
-      }
-    },
-    "actions": {
-      "Get_file_content": {
-        "type": "ApiConnection",
-        "inputs": {
-          "host": {
-            "connection": {
-              "referenceName": "sharepointonline"
-            }
-          },
-          "method": "get",
-          "path": "/datasets/@{encodeURIComponent(encodeURIComponent('__SP_SITE_URL__'))}/files/@{encodeURIComponent(triggerBody()?['{Identifier}'])}/content",
-          "queries": {
-            "inferContentType": true
-          }
-        },
-        "runAfter": {}
-      },
-      "Call_Function_App": {
-        "type": "Http",
-        "inputs": {
-          "method": "POST",
-          "uri": "https://__FUNC_HOSTNAME__/api/analyze-and-store",
-          "headers": {
-            "x-functions-key": "__FUNCTION_KEY__"
-          },
-          "body": {
-            "filename": "@{triggerBody()?['{Name}']}",
-            "content": "@{base64(body('Get_file_content'))}"
-          }
-        },
-        "runAfter": {
-          "Get_file_content": ["Succeeded"]
-        },
-        "runtimeConfiguration": {
-          "contentTransfer": {
-            "transferMode": "Chunked"
-          }
+# Create connections.json using PowerShell objects (avoids here-string parsing issues)
+$connectionsObj = [ordered]@{
+    managedApiConnections = [ordered]@{
+        sharepointonline = [ordered]@{
+            api = [ordered]@{ id = $MANAGED_API_ID }
+            connection = [ordered]@{ id = $SP_CONNECTION_ID }
+            connectionRuntimeUrl = $SP_CONNECTION_RUNTIME_URL
+            authentication = [ordered]@{ type = "ManagedServiceIdentity" }
         }
-      }
-    },
-    "outputs": {}
-  },
-  "kind": "Stateful"
+    }
 }
-'@
-$workflowJson = $workflowJson -replace '__SP_SITE_URL__', $SP_SITE_URL
-$workflowJson = $workflowJson -replace '__SP_LIBRARY_ID__', $SP_LIBRARY_ID
-$workflowJson = $workflowJson -replace '__FUNC_HOSTNAME__', $FUNC_HOSTNAME
-$workflowJson = $workflowJson -replace '__FUNCTION_KEY__', $FUNCTION_KEY
-$workflowJson | Set-Content -Path (Join-Path $WORKFLOW_TRIGGER_DIR "workflow.json") -Encoding UTF8
+$connectionsObj | ConvertTo-Json -Depth 10 | Set-Content -Path (Join-Path $WORKFLOW_DIR "connections.json") -Encoding UTF8
+
+# Create workflow.json using PowerShell objects
+$spTriggerPath = '/datasets/@{encodeURIComponent(encodeURIComponent(''__SP_SITE_URL__''))}/tables/@{encodeURIComponent(encodeURIComponent(''__SP_LIBRARY_ID__''))}/onnewfileitems'
+$spTriggerPath = $spTriggerPath -replace '__SP_SITE_URL__', $SP_SITE_URL
+$spTriggerPath = $spTriggerPath -replace '__SP_LIBRARY_ID__', $SP_LIBRARY_ID
+$spGetFilePath = '/datasets/@{encodeURIComponent(encodeURIComponent(''__SP_SITE_URL__''))}/files/@{encodeURIComponent(triggerBody()?[''{Identifier}''])}/content'
+$spGetFilePath = $spGetFilePath -replace '__SP_SITE_URL__', $SP_SITE_URL
+$funcUri = 'https://' + $FUNC_HOSTNAME + '/api/analyze-and-store'
+
+$workflowObj = [ordered]@{
+    definition = [ordered]@{
+        '$schema' = "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#"
+        contentVersion = "1.0.0.0"
+        parameters = [ordered]@{
+            '$connections' = [ordered]@{
+                defaultValue = @{}
+                type = "Object"
+            }
+        }
+        triggers = [ordered]@{
+            When_a_file_is_created_properties_only = [ordered]@{
+                type = "ApiConnection"
+                inputs = [ordered]@{
+                    host = [ordered]@{
+                        connection = [ordered]@{ referenceName = "sharepointonline" }
+                    }
+                    method = "get"
+                    path = $spTriggerPath
+                }
+                recurrence = [ordered]@{
+                    frequency = "Minute"
+                    interval = 1
+                }
+                splitOn = '@triggerBody()?[''value'']'
+            }
+        }
+        actions = [ordered]@{
+            Get_file_content = [ordered]@{
+                type = "ApiConnection"
+                inputs = [ordered]@{
+                    host = [ordered]@{
+                        connection = [ordered]@{ referenceName = "sharepointonline" }
+                    }
+                    method = "get"
+                    path = $spGetFilePath
+                    queries = [ordered]@{ inferContentType = $true }
+                }
+                runAfter = @{}
+            }
+            Call_Function_App = [ordered]@{
+                type = "Http"
+                inputs = [ordered]@{
+                    method = "POST"
+                    uri = $funcUri
+                    headers = [ordered]@{ "x-functions-key" = $FUNCTION_KEY }
+                    body = [ordered]@{
+                        filename = '@{triggerBody()?[''{Name}'']}'
+                        content = '@{base64(body(''Get_file_content''))}'
+                    }
+                }
+                runAfter = [ordered]@{
+                    Get_file_content = @("Succeeded")
+                }
+                runtimeConfiguration = [ordered]@{
+                    contentTransfer = [ordered]@{ transferMode = "Chunked" }
+                }
+            }
+        }
+        outputs = @{}
+    }
+    kind = "Stateful"
+}
+$workflowObj | ConvertTo-Json -Depth 20 | Set-Content -Path (Join-Path $WORKFLOW_TRIGGER_DIR "workflow.json") -Encoding UTF8
 
 # Zip and deploy the workflow
 $zipPath = Join-Path $env:TEMP "logic-workflow-$PID.zip"
