@@ -162,34 +162,37 @@ $SP_SITE_URL = $SHAREPOINT_SITE_URL
 $SP_LIBRARY_ID = $SHAREPOINT_LIBRARY_ID
 
 # Create connections.json
-$connectionsJson = @"
+$connectionsJson = @'
 {
   "managedApiConnections": {
     "sharepointonline": {
       "api": {
-        "id": "$MANAGED_API_ID"
+        "id": "__MANAGED_API_ID__"
       },
       "connection": {
-        "id": "$SP_CONNECTION_ID"
+        "id": "__SP_CONNECTION_ID__"
       },
-      "connectionRuntimeUrl": "$SP_CONNECTION_RUNTIME_URL",
+      "connectionRuntimeUrl": "__SP_CONNECTION_RUNTIME_URL__",
       "authentication": {
         "type": "ManagedServiceIdentity"
       }
     }
   }
 }
-"@
+'@
+$connectionsJson = $connectionsJson -replace '__MANAGED_API_ID__', $MANAGED_API_ID
+$connectionsJson = $connectionsJson -replace '__SP_CONNECTION_ID__', $SP_CONNECTION_ID
+$connectionsJson = $connectionsJson -replace '__SP_CONNECTION_RUNTIME_URL__', $SP_CONNECTION_RUNTIME_URL
 $connectionsJson | Set-Content -Path (Join-Path $WORKFLOW_DIR "connections.json") -Encoding UTF8
 
 # Create workflow.json for the contract-trigger workflow
-$workflowJson = @"
+$workflowJson = @'
 {
   "definition": {
-    "`$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+    "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
     "contentVersion": "1.0.0.0",
     "parameters": {
-      "`$connections": {
+      "$connections": {
         "defaultValue": {},
         "type": "Object"
       }
@@ -204,7 +207,7 @@ $workflowJson = @"
             }
           },
           "method": "get",
-          "path": "/datasets/@{encodeURIComponent(encodeURIComponent('$SP_SITE_URL'))}/tables/@{encodeURIComponent(encodeURIComponent('$SP_LIBRARY_ID'))}/onnewfileitems"
+          "path": "/datasets/@{encodeURIComponent(encodeURIComponent('__SP_SITE_URL__'))}/tables/@{encodeURIComponent(encodeURIComponent('__SP_LIBRARY_ID__'))}/onnewfileitems"
         },
         "recurrence": {
           "frequency": "Minute",
@@ -223,7 +226,7 @@ $workflowJson = @"
             }
           },
           "method": "get",
-          "path": "/datasets/@{encodeURIComponent(encodeURIComponent('$SP_SITE_URL'))}/files/@{encodeURIComponent(triggerBody()?['{Identifier}'])}/content",
+          "path": "/datasets/@{encodeURIComponent(encodeURIComponent('__SP_SITE_URL__'))}/files/@{encodeURIComponent(triggerBody()?['{Identifier}'])}/content",
           "queries": {
             "inferContentType": true
           }
@@ -234,9 +237,9 @@ $workflowJson = @"
         "type": "Http",
         "inputs": {
           "method": "POST",
-          "uri": "https://$FUNC_HOSTNAME/api/analyze-and-store",
+          "uri": "https://__FUNC_HOSTNAME__/api/analyze-and-store",
           "headers": {
-            "x-functions-key": "$FUNCTION_KEY"
+            "x-functions-key": "__FUNCTION_KEY__"
           },
           "body": {
             "filename": "@{triggerBody()?['{Name}']}",
@@ -257,7 +260,11 @@ $workflowJson = @"
   },
   "kind": "Stateful"
 }
-"@
+'@
+$workflowJson = $workflowJson -replace '__SP_SITE_URL__', $SP_SITE_URL
+$workflowJson = $workflowJson -replace '__SP_LIBRARY_ID__', $SP_LIBRARY_ID
+$workflowJson = $workflowJson -replace '__FUNC_HOSTNAME__', $FUNC_HOSTNAME
+$workflowJson = $workflowJson -replace '__FUNCTION_KEY__', $FUNCTION_KEY
 $workflowJson | Set-Content -Path (Join-Path $WORKFLOW_TRIGGER_DIR "workflow.json") -Encoding UTF8
 
 # Zip and deploy the workflow
