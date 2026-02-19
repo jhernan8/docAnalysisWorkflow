@@ -25,14 +25,30 @@ $LOGIC_SUBNET_PREFIX = ""         # e.g., "10.0.6.0/24"
 $DNS_ZONE_SUBSCRIPTION_ID = ""    # Subscription ID where Private DNS Zones live
 $DNS_ZONE_RESOURCE_GROUP = ""     # Resource group containing Private DNS Zones
 
-# Prompt for configuration values
+# Azure AD Configuration - FILL THESE IN to skip prompts
+$AAD_OBJECT_ID = ""          # Your Azure AD Object ID (run: az ad signed-in-user show --query id -o tsv)
+$AAD_DISPLAY_NAME = ""       # Your Azure AD display name / email / UPN
+
+# SharePoint Configuration - FILL THESE IN to skip prompts
+$SHAREPOINT_SITE_URL = ""    # e.g., "https://contoso.sharepoint.com/sites/ContractAI"
+$SHAREPOINT_LIBRARY_ID = ""  # e.g., "0c082b7c-8834-480c-8b30-47ba73e8562c"
+
+# Prompt only for values not hardcoded above
 Write-Host "`nAzure AD Configuration (for SQL Azure AD-only auth):" -ForegroundColor Yellow
-$AAD_OBJECT_ID = Read-Host "Enter your Azure AD Object ID (run 'az ad signed-in-user show --query id -o tsv')"
-$AAD_DISPLAY_NAME = Read-Host "Enter your Azure AD display name (email)"
+if ([string]::IsNullOrEmpty($AAD_OBJECT_ID)) {
+    $AAD_OBJECT_ID = Read-Host "Enter your Azure AD Object ID (run 'az ad signed-in-user show --query id -o tsv')"
+}
+if ([string]::IsNullOrEmpty($AAD_DISPLAY_NAME)) {
+    $AAD_DISPLAY_NAME = Read-Host "Enter your Azure AD display name (email)"
+}
 
 Write-Host "`nSharePoint Configuration:" -ForegroundColor Yellow
-$SHAREPOINT_SITE_URL = Read-Host "Enter SharePoint site URL (e.g., https://contoso.sharepoint.com/sites/ContractAI)"
-$SHAREPOINT_LIBRARY_ID = Read-Host "Enter SharePoint document library ID (GUID)"
+if ([string]::IsNullOrEmpty($SHAREPOINT_SITE_URL)) {
+    $SHAREPOINT_SITE_URL = Read-Host "Enter SharePoint site URL (e.g., https://contoso.sharepoint.com/sites/ContractAI)"
+}
+if ([string]::IsNullOrEmpty($SHAREPOINT_LIBRARY_ID)) {
+    $SHAREPOINT_LIBRARY_ID = Read-Host "Enter SharePoint document library ID (GUID)"
+}
 
 Write-Host "`nNetworking Configuration:" -ForegroundColor Yellow
 if ([string]::IsNullOrEmpty($VNET_RESOURCE_GROUP)) {
@@ -96,21 +112,37 @@ $deployArgs = @(
     "dnsZoneResourceGroupName=$DNS_ZONE_RESOURCE_GROUP",
     '--output', 'none'
 )
+Write-Host "  Running: az $($deployArgs -join ' ')" -ForegroundColor Gray
 az @deployArgs
 
-if ($LASTEXITCODE -ne 0) { throw "Failed to deploy Bicep template" }
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "  Bicep deployment returned exit code: $LASTEXITCODE" -ForegroundColor Red
+    Write-Host "  Listing deployments in resource group..." -ForegroundColor Red
+    az deployment group list -g $RESOURCE_GROUP --query "[].{name:name, state:properties.provisioningState}" -o table
+    throw "Failed to deploy Bicep template (exit code $LASTEXITCODE)"
+}
 Write-Host "✓ Infrastructure deployed" -ForegroundColor Green
 
-# Extract outputs - verify deployment exists first
-$deploymentState = az deployment group show -g $RESOURCE_GROUP -n main --query "properties.provisioningState" -o tsv 2>$null
-if (-not $deploymentState -or $deploymentState -ne 'Succeeded') {
-    throw "Deployment 'main' not found or did not succeed (state: $deploymentState). Check the Azure Portal for deployment errors."
+# Extract outputs
+Write-Host "  Extracting deployment outputs..." -ForegroundColor Yellow
+$deploymentJson = az deployment group show -g $RESOURCE_GROUP -n main -o json 2>&1
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "  Could not find deployment 'main'. Listing all deployments:" -ForegroundColor Red
+    az deployment group list -g $RESOURCE_GROUP --query "[].{name:name, state:properties.provisioningState}" -o table
+    throw "Deployment 'main' not found. Check the table above for the actual deployment name/state."
 }
 
-$FUNCTION_APP_NAME = (az deployment group show -g $RESOURCE_GROUP -n main --query "properties.outputs.functionAppName.value" -o tsv).Trim()
-$SQL_SERVER = (az deployment group show -g $RESOURCE_GROUP -n main --query "properties.outputs.sqlServerFqdn.value" -o tsv).Trim()
-$SQL_DATABASE = (az deployment group show -g $RESOURCE_GROUP -n main --query "properties.outputs.sqlDatabaseName.value" -o tsv).Trim()
-$STORAGE_ACCOUNT = (az deployment group show -g $RESOURCE_GROUP -n main --query "properties.outputs.storageAccountName.value" -o tsv).Trim()
+$deployment = $deploymentJson | ConvertFrom-Json
+$FUNCTION_APP_NAME = $deployment.properties.outputs.functionAppName.value
+$SQL_SERVER = $deployment.properties.outputs.sqlServerFqdn.value
+$SQL_DATABASE = $deployment.properties.outputs.sqlDatabaseName.value
+$STORAGE_ACCOUNT = $deployment.properties.outputs.storageAccountName.value
+
+if (-not $FUNCTION_APP_NAME) {
+    throw "Deployment outputs are empty — the Bicep deployment may have failed. Check Azure Portal -> Resource Group -> Deployments."
+}
+Write-Host "  Function App: $FUNCTION_APP_NAME" -ForegroundColor Gray
+Write-Host "  Storage:      $STORAGE_ACCOUNT" -ForegroundColor Gray
 
 # ============================================================================
 # Step 3: Deploy Function App code
