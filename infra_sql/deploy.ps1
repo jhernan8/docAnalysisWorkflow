@@ -58,10 +58,13 @@ if ([string]::IsNullOrEmpty($DNS_ZONE_RESOURCE_GROUP)) {
 # Step 1: Create resource group
 # ============================================================================
 Write-Host "`nStep 1: Creating resource group..." -ForegroundColor Yellow
-az group create `
-    --name $RESOURCE_GROUP `
-    --location $LOCATION `
-    --output none
+$rgArgs = @(
+    'group', 'create',
+    '--name', $RESOURCE_GROUP,
+    '--location', $LOCATION,
+    '--output', 'none'
+)
+az @rgArgs
 
 if ($LASTEXITCODE -ne 0) { throw "Failed to create resource group" }
 Write-Host "✓ Resource group created" -ForegroundColor Green
@@ -70,30 +73,40 @@ Write-Host "✓ Resource group created" -ForegroundColor Green
 # Step 2: Deploy Bicep template
 # ============================================================================
 Write-Host "`nStep 2: Deploying Bicep template..." -ForegroundColor Yellow
-az deployment group create `
-    --resource-group $RESOURCE_GROUP `
-    --template-file main.bicep `
-    --parameters baseName=$BASE_NAME `
-    --parameters location=$LOCATION `
-    --parameters sqlLocation=$SQL_LOCATION `
-    --parameters environment=$ENVIRONMENT `
-    --parameters sqlAadAdminObjectId=$AAD_OBJECT_ID `
-    --parameters sqlAadAdminDisplayName=$AAD_DISPLAY_NAME `
-    --parameters sharePointSiteUrl=$SHAREPOINT_SITE_URL `
-    --parameters sharePointLibraryId=$SHAREPOINT_LIBRARY_ID `
-    --parameters vnetName=$VNET_NAME `
-    --parameters vnetResourceGroupName=$VNET_RESOURCE_GROUP `
-    --parameters privateEndpointSubnetAddressPrefix=$PE_SUBNET_PREFIX `
-    --parameters vnetIntegrationSubnetAddressPrefix=$FUNC_SUBNET_PREFIX `
-    --parameters logicAppSubnetAddressPrefix=$LOGIC_SUBNET_PREFIX `
-    --parameters dnsZoneSubscriptionId=$DNS_ZONE_SUBSCRIPTION_ID `
-    --parameters dnsZoneResourceGroupName=$DNS_ZONE_RESOURCE_GROUP `
-    --output none
+$deployArgs = @(
+    'deployment', 'group', 'create',
+    '--resource-group', $RESOURCE_GROUP,
+    '--name', 'main',
+    '--template-file', 'main.bicep',
+    '--parameters',
+    "baseName=$BASE_NAME",
+    "location=$LOCATION",
+    "sqlLocation=$SQL_LOCATION",
+    "environment=$ENVIRONMENT",
+    "sqlAadAdminObjectId=$AAD_OBJECT_ID",
+    "sqlAadAdminDisplayName=$AAD_DISPLAY_NAME",
+    "sharePointSiteUrl=$SHAREPOINT_SITE_URL",
+    "sharePointLibraryId=$SHAREPOINT_LIBRARY_ID",
+    "vnetName=$VNET_NAME",
+    "vnetResourceGroupName=$VNET_RESOURCE_GROUP",
+    "privateEndpointSubnetAddressPrefix=$PE_SUBNET_PREFIX",
+    "vnetIntegrationSubnetAddressPrefix=$FUNC_SUBNET_PREFIX",
+    "logicAppSubnetAddressPrefix=$LOGIC_SUBNET_PREFIX",
+    "dnsZoneSubscriptionId=$DNS_ZONE_SUBSCRIPTION_ID",
+    "dnsZoneResourceGroupName=$DNS_ZONE_RESOURCE_GROUP",
+    '--output', 'none'
+)
+az @deployArgs
 
 if ($LASTEXITCODE -ne 0) { throw "Failed to deploy Bicep template" }
 Write-Host "✓ Infrastructure deployed" -ForegroundColor Green
 
-# Extract outputs
+# Extract outputs - verify deployment exists first
+$deploymentState = az deployment group show -g $RESOURCE_GROUP -n main --query "properties.provisioningState" -o tsv 2>$null
+if (-not $deploymentState -or $deploymentState -ne 'Succeeded') {
+    throw "Deployment 'main' not found or did not succeed (state: $deploymentState). Check the Azure Portal for deployment errors."
+}
+
 $FUNCTION_APP_NAME = (az deployment group show -g $RESOURCE_GROUP -n main --query "properties.outputs.functionAppName.value" -o tsv).Trim()
 $SQL_SERVER = (az deployment group show -g $RESOURCE_GROUP -n main --query "properties.outputs.sqlServerFqdn.value" -o tsv).Trim()
 $SQL_DATABASE = (az deployment group show -g $RESOURCE_GROUP -n main --query "properties.outputs.sqlDatabaseName.value" -o tsv).Trim()
@@ -104,11 +117,14 @@ $STORAGE_ACCOUNT = (az deployment group show -g $RESOURCE_GROUP -n main --query 
 # ============================================================================
 Write-Host "`nStep 3: Deploying Function App code..." -ForegroundColor Yellow
 Write-Host "  Temporarily enabling storage public access for deployment..." -ForegroundColor Yellow
-az storage account update `
-    -g $RESOURCE_GROUP `
-    -n $STORAGE_ACCOUNT `
-    --public-network-access Enabled `
-    --output none
+$storageEnableArgs = @(
+    'storage', 'account', 'update',
+    '-g', $RESOURCE_GROUP,
+    '-n', $STORAGE_ACCOUNT,
+    '--public-network-access', 'Enabled',
+    '--output', 'none'
+)
+az @storageEnableArgs
 
 if ($LASTEXITCODE -ne 0) { throw "Failed to enable storage public access" }
 
@@ -124,11 +140,14 @@ if ($LASTEXITCODE -ne 0) {
 Pop-Location
 
 Write-Host "  Re-disabling storage public access..." -ForegroundColor Yellow
-az storage account update `
-    -g $RESOURCE_GROUP `
-    -n $STORAGE_ACCOUNT `
-    --public-network-access Disabled `
-    --output none
+$storageDisableArgs = @(
+    'storage', 'account', 'update',
+    '-g', $RESOURCE_GROUP,
+    '-n', $STORAGE_ACCOUNT,
+    '--public-network-access', 'Disabled',
+    '--output', 'none'
+)
+az @storageDisableArgs
 
 if ($LASTEXITCODE -ne 0) { throw "Failed to disable storage public access" }
 Write-Host "✓ Function code deployed (storage re-secured)" -ForegroundColor Green
@@ -252,11 +271,14 @@ $zipPath = Join-Path $env:TEMP "logic-workflow-$PID.zip"
 if (Test-Path $zipPath) { Remove-Item $zipPath -Force }
 Compress-Archive -Path (Join-Path $WORKFLOW_DIR "*") -DestinationPath $zipPath -Force
 
-az logicapp deployment source config-zip `
-    -g $RESOURCE_GROUP `
-    -n $LOGIC_APP_NAME `
-    --src $zipPath `
-    --output none
+$logicDeployArgs = @(
+    'logicapp', 'deployment', 'source', 'config-zip',
+    '-g', $RESOURCE_GROUP,
+    '-n', $LOGIC_APP_NAME,
+    '--src', $zipPath,
+    '--output', 'none'
+)
+az @logicDeployArgs
 
 if ($LASTEXITCODE -ne 0) { throw "Failed to deploy Logic App workflow" }
 
