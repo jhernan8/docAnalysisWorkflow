@@ -85,7 +85,7 @@ $rgArgs = @(
 az @rgArgs
 
 if ($LASTEXITCODE -ne 0) { throw "Failed to create resource group" }
-Write-Host "✓ Resource group created" -ForegroundColor Green
+Write-Host "[OK] Resource group created" -ForegroundColor Green
 
 # ============================================================================
 # Step 2: Deploy Bicep template
@@ -123,7 +123,7 @@ if ($LASTEXITCODE -ne 0) {
     az deployment group list -g $RESOURCE_GROUP --query '[].{name:name, state:properties.provisioningState}' -o table
     throw "Failed to deploy Bicep template - exit code: $LASTEXITCODE"
 }
-Write-Host "✓ Infrastructure deployed" -ForegroundColor Green
+Write-Host "[OK] Infrastructure deployed" -ForegroundColor Green
 
 # Extract outputs
 Write-Host "  Extracting deployment outputs..." -ForegroundColor Yellow
@@ -184,7 +184,7 @@ $storageDisableArgs = @(
 az @storageDisableArgs
 
 if ($LASTEXITCODE -ne 0) { throw "Failed to disable storage public access" }
-Write-Host "✓ Function code deployed (storage re-secured)" -ForegroundColor Green
+Write-Host "[OK] Function code deployed - storage re-secured" -ForegroundColor Green
 
 # Extract Logic App name for final output
 $LOGIC_APP_NAME = (az deployment group show -g $RESOURCE_GROUP -n main --query "properties.outputs.logicAppName.value" -o tsv).Trim()
@@ -320,7 +320,7 @@ if ($LASTEXITCODE -ne 0) { throw "Failed to deploy Logic App workflow" }
 Remove-Item -Path $WORKFLOW_DIR -Recurse -Force -ErrorAction SilentlyContinue
 Remove-Item -Path $zipPath -Force -ErrorAction SilentlyContinue
 
-Write-Host "✓ Logic App workflow deployed" -ForegroundColor Green
+Write-Host "[OK] Logic App workflow deployed" -ForegroundColor Green
 
 # ============================================================================
 # Deployment Complete
