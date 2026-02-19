@@ -118,7 +118,7 @@ az @deployArgs
 if ($LASTEXITCODE -ne 0) {
     Write-Host "  Bicep deployment returned exit code: $LASTEXITCODE" -ForegroundColor Red
     Write-Host "  Listing deployments in resource group..." -ForegroundColor Red
-    az deployment group list -g $RESOURCE_GROUP --query "[].{name:name, state:properties.provisioningState}" -o table
+    az deployment group list -g $RESOURCE_GROUP --query '[].{name:name, state:properties.provisioningState}' -o table
     throw "Failed to deploy Bicep template (exit code $LASTEXITCODE)"
 }
 Write-Host "✓ Infrastructure deployed" -ForegroundColor Green
@@ -128,7 +128,7 @@ Write-Host "  Extracting deployment outputs..." -ForegroundColor Yellow
 $deploymentJson = az deployment group show -g $RESOURCE_GROUP -n main -o json 2>&1
 if ($LASTEXITCODE -ne 0) {
     Write-Host "  Could not find deployment 'main'. Listing all deployments:" -ForegroundColor Red
-    az deployment group list -g $RESOURCE_GROUP --query "[].{name:name, state:properties.provisioningState}" -o table
+    az deployment group list -g $RESOURCE_GROUP --query '[].{name:name, state:properties.provisioningState}' -o table
     throw "Deployment 'main' not found. Check the table above for the actual deployment name/state."
 }
 
@@ -139,7 +139,7 @@ $SQL_DATABASE = $deployment.properties.outputs.sqlDatabaseName.value
 $STORAGE_ACCOUNT = $deployment.properties.outputs.storageAccountName.value
 
 if (-not $FUNCTION_APP_NAME) {
-    throw "Deployment outputs are empty — the Bicep deployment may have failed. Check Azure Portal -> Resource Group -> Deployments."
+    throw "Deployment outputs are empty - the Bicep deployment may have failed. Check Azure Portal -> Resource Group -> Deployments."
 }
 Write-Host "  Function App: $FUNCTION_APP_NAME" -ForegroundColor Gray
 Write-Host "  Storage:      $STORAGE_ACCOUNT" -ForegroundColor Gray
@@ -337,20 +337,20 @@ Write-Host "  Storage:                $STORAGE_ACCOUNT"
 Write-Host "  VNet:                   $VNET_NAME (in $VNET_RESOURCE_GROUP)"
 
 Write-Host "`nPrivate Endpoints Created:" -ForegroundColor Yellow
-Write-Host "  - Storage (blob, file, queue, table)"
-Write-Host "  - Azure SQL Server"
-Write-Host "  - Function App (inbound)"
-Write-Host "  - Logic App Standard (inbound)"
+Write-Host '  - Storage (blob, file, queue, table)'
+Write-Host '  - Azure SQL Server'
+Write-Host '  - Function App (inbound)'
+Write-Host '  - Logic App Standard (inbound)'
 
 Write-Host "`nRemaining Manual Steps:" -ForegroundColor Yellow
 Write-Host ""
 Write-Host "1. Run SQL setup scripts (connect via Private Endpoint or from within VNet):"
 Write-Host "   a. Connect to: $SQL_SERVER / $SQL_DATABASE"
 Write-Host "   b. Run create_tables.sql to create the schema"
-Write-Host "   c. Run this SQL to grant Function App access:"
-Write-Host "      CREATE USER [$FUNCTION_APP_NAME] FROM EXTERNAL PROVIDER;"
-Write-Host "      ALTER ROLE db_datareader ADD MEMBER [$FUNCTION_APP_NAME];"
-Write-Host "      ALTER ROLE db_datawriter ADD MEMBER [$FUNCTION_APP_NAME];"
+Write-Host '   c. Run this SQL to grant Function App access:'
+Write-Host "      CREATE USER [`$FUNCTION_APP_NAME] FROM EXTERNAL PROVIDER;"
+Write-Host "      ALTER ROLE db_datareader ADD MEMBER [`$FUNCTION_APP_NAME];"
+Write-Host "      ALTER ROLE db_datawriter ADD MEMBER [`$FUNCTION_APP_NAME];"
 Write-Host ""
 Write-Host "2. Create Azure AI Foundry resource and Content Understanding analyzer"
 Write-Host "   a. Go to: Azure Portal -> Create Resource -> Azure AI Foundry"
