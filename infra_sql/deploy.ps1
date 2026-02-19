@@ -4,6 +4,8 @@
 # ============================================================================
 
 $ErrorActionPreference = "Stop"
+# Prevent PowerShell from treating az CLI stderr output as terminating errors
+$PSNativeCommandUseErrorActionPreference = $false
 
 Write-Host "========================================" -ForegroundColor Green
 Write-Host "Contract Analysis Solution Deployment" -ForegroundColor Green
