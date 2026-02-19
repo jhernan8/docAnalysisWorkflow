@@ -6,6 +6,8 @@
 $ErrorActionPreference = "Stop"
 # Prevent PowerShell from treating az CLI stderr output as terminating errors
 $PSNativeCommandUseErrorActionPreference = $false
+# Skip Bicep version check (avoids SSL errors on corporate networks with proxy/firewall)
+$env:AZURE_BICEP_CHECK_VERSION = "false"
 
 Write-Host "========================================" -ForegroundColor Green
 Write-Host "Contract Analysis Solution Deployment" -ForegroundColor Green
