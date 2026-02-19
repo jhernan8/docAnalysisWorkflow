@@ -10,15 +10,21 @@ $PSNativeCommandUseErrorActionPreference = $false
 $env:AZURE_BICEP_CHECK_VERSION = "false"
 
 # Use a locally-installed Bicep CLI to avoid SSL/download issues on corporate networks.
-# If Bicep isn't installed yet, run: az bicep install
-$localBicep = Join-Path $env:USERPROFILE ".azure" "bin" "bicep.exe"
-if (Test-Path $localBicep) {
+# Checks both common install locations: az bicep install and winget/standalone installer.
+$bicepPaths = @(
+    (Join-Path $env:USERPROFILE ".azure\bin\bicep.exe"),
+    (Join-Path $env:LOCALAPPDATA "Programs\Bicep CLI\bicep.exe")
+)
+$localBicep = $bicepPaths | Where-Object { Test-Path $_ } | Select-Object -First 1
+
+if ($localBicep) {
     $env:AZURE_BICEP_PATH = $localBicep
     Write-Host "Using local Bicep: $localBicep" -ForegroundColor Cyan
 } else {
-    Write-Host "Local Bicep not found at $localBicep - installing..." -ForegroundColor Yellow
+    Write-Host "Local Bicep not found - installing via az bicep install..." -ForegroundColor Yellow
     az bicep install
-    if (Test-Path $localBicep) {
+    $localBicep = $bicepPaths | Where-Object { Test-Path $_ } | Select-Object -First 1
+    if ($localBicep) {
         $env:AZURE_BICEP_PATH = $localBicep
         Write-Host "Bicep installed and configured: $localBicep" -ForegroundColor Cyan
     } else {
@@ -94,11 +100,25 @@ Write-Host "[OK] Resource group created" -ForegroundColor Green
 # Step 2: Deploy Bicep template
 # ============================================================================
 Write-Host "`nStep 2: Deploying Bicep template..." -ForegroundColor Yellow
+
+# Pre-compile Bicep to ARM JSON locally so az deployment never invokes Bicep itself
+# (avoids any network calls for Bicep version checks or downloads)
+$armTemplatePath = Join-Path $PSScriptRoot "main.json"
+if ($env:AZURE_BICEP_PATH) {
+    Write-Host "  Pre-compiling main.bicep to ARM JSON using local Bicep..." -ForegroundColor Gray
+    & $env:AZURE_BICEP_PATH build (Join-Path $PSScriptRoot "main.bicep") --outfile $armTemplatePath
+    if ($LASTEXITCODE -ne 0) { throw "Bicep compilation failed" }
+    $templateFile = $armTemplatePath
+    Write-Host "  Compiled to: $armTemplatePath" -ForegroundColor Gray
+} else {
+    $templateFile = 'main.bicep'
+}
+
 $deployArgs = @(
     'deployment', 'group', 'create',
     '--resource-group', $RESOURCE_GROUP,
     '--name', 'main',
-    '--template-file', 'main.bicep',
+    '--template-file', $templateFile,
     '--parameters',
     "baseName=$BASE_NAME",
     "location=$LOCATION",
@@ -127,6 +147,9 @@ if ($LASTEXITCODE -ne 0) {
     throw "Failed to deploy Bicep template - exit code: $LASTEXITCODE"
 }
 Write-Host "[OK] Infrastructure deployed" -ForegroundColor Green
+
+# Clean up compiled ARM template
+if (Test-Path $armTemplatePath) { Remove-Item $armTemplatePath -Force -ErrorAction SilentlyContinue }
 
 # Extract outputs
 Write-Host "  Extracting deployment outputs..." -ForegroundColor Yellow
