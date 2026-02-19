@@ -123,14 +123,15 @@ module monitoring 'modules/monitoring.bicep' = {
   }
 }
 
-// Storage Account (private endpoint, public access disabled)
+// Storage Account (deployed with public access to allow Function App provisioning;
+// the deploy script locks it down after all resources are created)
 module storage 'modules/storage.bicep' = {
   name: 'storage-deployment'
   params: {
     location: location
     storageAccountName: take(storageAccountName, 24)
     tags: tags
-    publicNetworkAccess: 'Disabled'
+    publicNetworkAccess: 'Enabled'
   }
 }
 

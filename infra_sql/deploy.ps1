@@ -176,20 +176,7 @@ Write-Host "  Storage:      $STORAGE_ACCOUNT" -ForegroundColor Gray
 # Step 3: Deploy Function App code
 # ============================================================================
 Write-Host "`nStep 3: Deploying Function App code..." -ForegroundColor Yellow
-Write-Host "  Temporarily enabling storage public access for deployment..." -ForegroundColor Yellow
-$storageEnableArgs = @(
-    'storage', 'account', 'update',
-    '-g', $RESOURCE_GROUP,
-    '-n', $STORAGE_ACCOUNT,
-    '--public-network-access', 'Enabled',
-    '--output', 'none'
-)
-az @storageEnableArgs
-
-if ($LASTEXITCODE -ne 0) { throw "Failed to enable storage public access" }
-
-# Allow a moment for the change to propagate
-Start-Sleep -Seconds 10
+Write-Host "  Storage public access is enabled (from Bicep) for deployment..." -ForegroundColor Yellow
 
 Push-Location ..\azure_function_sql
 func azure functionapp publish $FUNCTION_APP_NAME --python

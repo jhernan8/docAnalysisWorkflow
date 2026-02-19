@@ -18,6 +18,13 @@ param virtualNetworkSubnetId string = ''
 @description('Public network access setting')
 param publicNetworkAccess string = 'Enabled'
 
+// Reference existing storage account to retrieve connection string
+resource storageAccount 'Microsoft.Storage/storageAccounts@2023-01-01' existing = {
+  name: storageAccountName
+}
+
+var storageConnectionString = 'DefaultEndpointsProtocol=https;AccountName=${storageAccountName};AccountKey=${storageAccount.listKeys().keys[0].value};EndpointSuffix=${environment().suffixes.storage}'
+
 // Elastic Premium Plan - supports VNet integration with Microsoft.Web/serverFarms delegation
 resource appServicePlan 'Microsoft.Web/serverfarms@2023-12-01' = {
   name: appServicePlanName
@@ -57,15 +64,15 @@ resource functionApp 'Microsoft.Web/sites@2023-12-01' = {
       minTlsVersion: '1.2'
       appSettings: [
         // ============================================
-        // Storage - Using Managed Identity
+        // Storage - Connection string with account key (required for EP1)
         // ============================================
         {
-          name: 'AzureWebJobsStorage__accountName'
-          value: storageAccountName
+          name: 'AzureWebJobsStorage'
+          value: storageConnectionString
         }
         {
           name: 'WEBSITE_CONTENTAZUREFILECONNECTIONSTRING'
-          value: 'DefaultEndpointsProtocol=https;AccountName=${storageAccountName};EndpointSuffix=${environment().suffixes.storage}'
+          value: storageConnectionString
         }
         {
           name: 'WEBSITE_CONTENTSHARE'
