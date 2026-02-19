@@ -409,6 +409,7 @@ output sqlServerFqdn string = sql.outputs.sqlServerFqdn
 output sqlDatabaseName string = sql.outputs.sqlDatabaseName
 output storageAccountName string = storage.outputs.storageAccountName
 output functionAppPrincipalId string = functionApp.outputs.functionAppPrincipalId
+output logicAppPrincipalId string = logicApp.outputs.logicAppPrincipalId
 
 // Post-deployment instructions
 output postDeploymentInstructions string = '''

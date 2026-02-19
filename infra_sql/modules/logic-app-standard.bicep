@@ -45,6 +45,7 @@ resource appServicePlan 'Microsoft.Web/serverfarms@2023-12-01' = {
 
 // API Connection for SharePoint Online
 // Note: OAuth consent must be done in Azure Portal after deployment
+// Access policy is created via az rest in deploy.ps1 (stable API, not supported in Bicep with 2016-06-01)
 resource sharePointConnection 'Microsoft.Web/connections@2016-06-01' = {
   name: '${logicAppName}-sharepoint-connection'
   location: location
@@ -53,22 +54,6 @@ resource sharePointConnection 'Microsoft.Web/connections@2016-06-01' = {
     displayName: 'SharePoint Connection for Contract Analysis'
     api: {
       id: subscriptionResourceId('Microsoft.Web/locations/managedApis', location, 'sharepointonline')
-    }
-  }
-}
-
-// Access policy to allow Logic App Standard to use the API connection
-resource connectionAccessPolicy 'Microsoft.Web/connections/accessPolicies@2016-06-01' = {
-  parent: sharePointConnection
-  name: '${logicAppName}-policy'
-  location: location
-  properties: {
-    principal: {
-      type: 'ActiveDirectory'
-      identity: {
-        tenantId: subscription().tenantId
-        objectId: logicApp.identity.principalId
-      }
     }
   }
 }

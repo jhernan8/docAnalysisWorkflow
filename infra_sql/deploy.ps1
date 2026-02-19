@@ -172,6 +172,36 @@ if (-not $FUNCTION_APP_NAME) {
 Write-Host "  Function App: $FUNCTION_APP_NAME" -ForegroundColor Gray
 Write-Host "  Storage:      $STORAGE_ACCOUNT" -ForegroundColor Gray
 
+# Create access policy for Logic App to use the SharePoint API connection
+# This uses the stable REST API directly since Bicep 2016-06-01 doesn't support accessPolicies
+Write-Host "  Creating SharePoint connection access policy for Logic App..." -ForegroundColor Yellow
+$LOGIC_APP_PRINCIPAL_ID = $deployment.properties.outputs.logicAppPrincipalId.value
+$TENANT_ID = (az account show --query tenantId -o tsv).Trim()
+$SP_CONN_NAME = $deployment.properties.outputs.sharePointConnectionName.value
+$accessPolicyBody = @{
+    location = $LOCATION
+    properties = @{
+        principal = @{
+            type = 'ActiveDirectory'
+            identity = @{
+                tenantId = $TENANT_ID
+                objectId = $LOGIC_APP_PRINCIPAL_ID
+            }
+        }
+    }
+} | ConvertTo-Json -Depth 5 -Compress
+
+$SUBSCRIPTION_ID_AP = (az account show --query id -o tsv).Trim()
+$accessPolicyUri = "https://management.azure.com/subscriptions/$SUBSCRIPTION_ID_AP/resourceGroups/$RESOURCE_GROUP/providers/Microsoft.Web/connections/$SP_CONN_NAME/accessPolicies/${SP_CONN_NAME}-policy?api-version=2016-06-01"
+
+az rest --method PUT --uri $accessPolicyUri --body $accessPolicyBody
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "  WARNING: Could not create access policy. You may need to authorize the connection manually." -ForegroundColor Red
+    Write-Host "  See 'Remaining Manual Steps' at the end." -ForegroundColor Red
+} else {
+    Write-Host "  [OK] Access policy created" -ForegroundColor Green
+}
+
 # ============================================================================
 # Step 3: Deploy Function App code
 # ============================================================================
