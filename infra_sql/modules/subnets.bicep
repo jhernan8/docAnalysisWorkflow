@@ -31,7 +31,7 @@ resource peSubnet 'Microsoft.Network/virtualNetworks/subnets@2024-01-01' = {
 }
 
 // Subnet for Function App VNet integration (outbound)
-// Must be delegated to Microsoft.Web/serverFarms
+// Elastic Premium plan uses Microsoft.Web/serverFarms delegation
 resource funcSubnet 'Microsoft.Network/virtualNetworks/subnets@2024-01-01' = {
   parent: vnet
   name: 'snet-func-integration'

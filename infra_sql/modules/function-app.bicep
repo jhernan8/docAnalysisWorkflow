@@ -1,6 +1,6 @@
 // ============================================================================
-// Function App Module - Flex Consumption Plan
-// Uses Managed Identity for Storage connection (fully supported on Flex)
+// Function App Module - Elastic Premium Plan (EP1)
+// Uses Managed Identity for Storage and SQL connections
 // ============================================================================
 
 param location string
@@ -18,22 +18,24 @@ param virtualNetworkSubnetId string = ''
 @description('Public network access setting')
 param publicNetworkAccess string = 'Enabled'
 
-// Flex Consumption Plan (supports managed identity for storage)
+// Elastic Premium Plan - supports VNet integration with Microsoft.Web/serverFarms delegation
 resource appServicePlan 'Microsoft.Web/serverfarms@2023-12-01' = {
   name: appServicePlanName
   location: location
   tags: tags
   sku: {
-    name: 'FC1'
-    tier: 'FlexConsumption'
+    name: 'EP1'
+    tier: 'ElasticPremium'
+    family: 'EP'
   }
-  kind: 'functionapp'
+  kind: 'elastic'
   properties: {
     reserved: true // Required for Linux
+    maximumElasticWorkerCount: 20
   }
 }
 
-// Function App on Flex Consumption
+// Function App on Elastic Premium
 resource functionApp 'Microsoft.Web/sites@2023-12-01' = {
   name: functionAppName
   location: location
@@ -49,35 +51,25 @@ resource functionApp 'Microsoft.Web/sites@2023-12-01' = {
     publicNetworkAccess: publicNetworkAccess
     virtualNetworkSubnetId: !empty(virtualNetworkSubnetId) ? virtualNetworkSubnetId : null
     vnetRouteAllEnabled: !empty(virtualNetworkSubnetId)
-    functionAppConfig: {
-      deployment: {
-        storage: {
-          type: 'blobContainer'
-          value: 'https://${storageAccountName}.blob.${environment().suffixes.storage}/deployments'
-          authentication: {
-            type: 'SystemAssignedIdentity'
-          }
-        }
-      }
-      scaleAndConcurrency: {
-        maximumInstanceCount: 100
-        instanceMemoryMB: 2048
-      }
-      runtime: {
-        name: 'python'
-        version: '3.12'
-      }
-    }
     siteConfig: {
+      linuxFxVersion: 'PYTHON|3.12'
       ftpsState: 'Disabled'
       minTlsVersion: '1.2'
       appSettings: [
         // ============================================
-        // Storage - Using Managed Identity (Flex supports this!)
+        // Storage - Using Managed Identity
         // ============================================
         {
           name: 'AzureWebJobsStorage__accountName'
           value: storageAccountName
+        }
+        {
+          name: 'WEBSITE_CONTENTAZUREFILECONNECTIONSTRING'
+          value: 'DefaultEndpointsProtocol=https;AccountName=${storageAccountName};EndpointSuffix=${environment().suffixes.storage}'
+        }
+        {
+          name: 'WEBSITE_CONTENTSHARE'
+          value: toLower(functionAppName)
         }
         // ============================================
         // Function Runtime
@@ -85,6 +77,10 @@ resource functionApp 'Microsoft.Web/sites@2023-12-01' = {
         {
           name: 'FUNCTIONS_EXTENSION_VERSION'
           value: '~4'
+        }
+        {
+          name: 'FUNCTIONS_WORKER_RUNTIME'
+          value: 'python'
         }
         // ============================================
         // Monitoring
