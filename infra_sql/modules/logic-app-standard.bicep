@@ -63,7 +63,7 @@ resource logicApp 'Microsoft.Web/sites@2023-12-01' = {
   name: logicAppName
   location: location
   tags: union(tags, { 'hidden-link: /app-insights-resource-id': appInsightsConnectionString })
-  kind: 'functionapp,workflowapp'
+  kind: 'functionapp,linux,workflowapp'
   identity: {
     type: 'SystemAssigned'
   }
