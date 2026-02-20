@@ -139,12 +139,13 @@ $deployArgs = @(
 )
 Write-Host "  Running: az $($deployArgs -join ' ')" -ForegroundColor Gray
 az @deployArgs
+$deployExitCode = $LASTEXITCODE
 
-if ($LASTEXITCODE -ne 0) {
-    Write-Host "  Bicep deployment returned exit code: $LASTEXITCODE" -ForegroundColor Red
+if ($deployExitCode -ne 0) {
+    Write-Host "  Bicep deployment returned exit code: $deployExitCode" -ForegroundColor Red
     Write-Host "  Listing deployments in resource group..." -ForegroundColor Red
     az deployment group list -g $RESOURCE_GROUP --query '[].{name:name, state:properties.provisioningState}' -o table
-    throw "Failed to deploy Bicep template - exit code: $LASTEXITCODE"
+    throw "Failed to deploy Bicep template - exit code: $deployExitCode"
 }
 Write-Host "[OK] Infrastructure deployed" -ForegroundColor Green
 
