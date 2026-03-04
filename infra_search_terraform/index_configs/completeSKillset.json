@@ -1,0 +1,93 @@
+{
+  "@odata.etag": "\"0x8DE6389C36DA510\"",
+  "name": "rag-1770147499308-skillset",
+  "description": "Skillset to extract content using Content Understanding and generate embeddings",
+  "skills": [
+    {
+      "@odata.type": "#Microsoft.Skills.Util.ContentUnderstandingSkill",
+      "name": "#1",
+      "description": "Extract and chunk content using Content Understanding",
+      "context": "/document",
+      "extractionOptions": ["images", "locationMetadata"],
+      "inputs": [
+        {
+          "name": "file_data",
+          "source": "/document/file_data",
+          "inputs": []
+        }
+      ],
+      "outputs": [
+        {
+          "name": "text_sections",
+          "targetName": "text_sections"
+        },
+        {
+          "name": "normalized_images",
+          "targetName": "normalized_images"
+        }
+      ],
+      "chunkingProperties": {
+        "unit": "characters",
+        "maximumLength": 2000,
+        "overlapLength": 200
+      }
+    },
+    {
+      "@odata.type": "#Microsoft.Skills.Text.AzureOpenAIEmbeddingSkill",
+      "name": "#2",
+      "description": "Generate embeddings for each text section",
+      "context": "/document/text_sections/*",
+      "resourceUri": "https://cntrct-srch-dev-ai-woyj6cue5no22.openai.azure.com",
+      "deploymentId": "text-embedding-3-large",
+      "dimensions": 3072,
+      "modelName": "text-embedding-3-large",
+      "inputs": [
+        {
+          "name": "text",
+          "source": "/document/text_sections/*/content",
+          "inputs": []
+        }
+      ],
+      "outputs": [
+        {
+          "name": "embedding",
+          "targetName": "text_vector"
+        }
+      ]
+    }
+  ],
+  "cognitiveServices": {
+    "@odata.type": "#Microsoft.Azure.Search.AIServicesByIdentity",
+    "description": "Keyless connection using managed identity",
+    "subdomainUrl": "https://cntrct-srch-dev-ai-woyj6cue5no22.cognitiveservices.azure.com/"
+  },
+  "indexProjections": {
+    "selectors": [
+      {
+        "targetIndexName": "rag-1770147499308",
+        "parentKeyFieldName": "parent_id",
+        "sourceContext": "/document/text_sections/*",
+        "mappings": [
+          {
+            "name": "text_vector",
+            "source": "/document/text_sections/*/text_vector",
+            "inputs": []
+          },
+          {
+            "name": "chunk",
+            "source": "/document/text_sections/*/content",
+            "inputs": []
+          },
+          {
+            "name": "title",
+            "source": "/document/title",
+            "inputs": []
+          }
+        ]
+      }
+    ],
+    "parameters": {
+      "projectionMode": "skipIndexingParentDocuments"
+    }
+  }
+}

@@ -1,0 +1,7 @@
+# Normalize text files and enforce LF for IaC files
+* text=auto
+
+# Terraform / HCL
+*.tf text eol=lf
+*.tfvars text eol=lf
+*.hcl text eol=lf
