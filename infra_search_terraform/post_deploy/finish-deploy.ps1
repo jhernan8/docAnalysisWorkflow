@@ -252,9 +252,35 @@ if ([string]::IsNullOrWhiteSpace($tfJson)) {
 
 $tf = $tfJson | ConvertFrom-Json
 
-$searchServiceId = $tf.search_service_id.value
-$storageAccountId = $tf.storage_account_id.value
-$logicAppId = $tf.logic_app_id.value
+$tfProperties = @()
+if ($null -ne $tf -and $null -ne $tf.PSObject -and $null -ne $tf.PSObject.Properties) {
+  $tfProperties = @($tf.PSObject.Properties)
+}
+
+if ($null -eq $tf -or $tfProperties.Length -eq 0) {
+  throw "Terraform output returned {} (no outputs in state). Run terraform apply in infra_search_terraform (same backend/workspace), then rerun this script."
+}
+
+function Get-TfOutputValue([object]$TfObject, [string]$OutputName) {
+  if ($null -eq $TfObject) {
+    return $null
+  }
+
+  $prop = $TfObject.PSObject.Properties[$OutputName]
+  if ($null -eq $prop -or $null -eq $prop.Value) {
+    return $null
+  }
+
+  if ($prop.Value.PSObject.Properties.Name -contains 'value') {
+    return $prop.Value.value
+  }
+
+  return $null
+}
+
+$searchServiceId = Get-TfOutputValue -TfObject $tf -OutputName "search_service_id"
+$storageAccountId = Get-TfOutputValue -TfObject $tf -OutputName "storage_account_id"
+$logicAppId = Get-TfOutputValue -TfObject $tf -OutputName "logic_app_id"
 
 if ([string]::IsNullOrWhiteSpace($searchServiceId) -or [string]::IsNullOrWhiteSpace($storageAccountId) -or [string]::IsNullOrWhiteSpace($logicAppId)) {
   throw "Missing required outputs (search_service_id, storage_account_id, logic_app_id)."
@@ -264,9 +290,7 @@ $searchServiceName = Get-NameFromResourceId $searchServiceId
 $storageAccountName = Get-NameFromResourceId $storageAccountId
 $logicAppName = Get-NameFromResourceId $logicAppId
 $aiMainId = $null
-if ($tf.PSObject.Properties.Name -contains "ai_services_admin_id") {
-  $aiMainId = $tf.ai_services_admin_id.value
-}
+$aiMainId = Get-TfOutputValue -TfObject $tf -OutputName "ai_services_admin_id"
 
 $logicLocation = az resource show --ids $logicAppId --query location -o tsv
 $searchEndpoint = "https://$searchServiceName.search.windows.net"
@@ -275,6 +299,8 @@ Write-Info "Resource Group: $ResourceGroupName"
 Write-Info "Search Service: $searchServiceName"
 Write-Info "Storage Account: $storageAccountName"
 Write-Info "Logic App: $logicAppName"
+
+$foundryProjectPrincipalId = $null
 
 if (-not $SkipRbac) {
   Write-Step "Ensuring RBAC role assignments"
@@ -316,7 +342,7 @@ if (-not $SkipFoundryProject) {
 
   if ([string]::IsNullOrWhiteSpace($AdminAiAccountName)) {
     $candidateNames = az resource list -g $ResourceGroupName --resource-type "Microsoft.CognitiveServices/accounts" --query "[].name" -o tsv
-    $nameList = $candidateNames -split "`n" | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+    $nameList = @($candidateNames -split "`n" | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
 
     $adminMatch = $nameList | Where-Object { $_ -match "^admin-" } | Select-Object -First 1
     if ($adminMatch) {
@@ -376,11 +402,14 @@ if (-not $SkipFoundryProject) {
         }
       }
 
+      $projectEnsured = $false
+
       $tmpProject = [System.IO.Path]::GetTempFileName()
       try {
         $projectBody | ConvertTo-Json -Depth 10 | Set-Content -Path $tmpProject -Encoding utf8
         az rest --method PUT --uri $projectUri --headers "Content-Type=application/json" --body "@$tmpProject" --only-show-errors | Out-Null
         Write-Ok "Foundry project ensured: $ProjectName"
+        $projectEnsured = $true
       }
       catch {
         Write-WarnLine "Project creation call failed. Details: $($_.Exception.Message)"
@@ -388,11 +417,36 @@ if (-not $SkipFoundryProject) {
       finally {
         Remove-Item -Path $tmpProject -ErrorAction SilentlyContinue
       }
+
+      if ($projectEnsured -or -not $SkipRbac) {
+        try {
+          $project = az rest --method GET --uri $projectUri --only-show-errors | ConvertFrom-Json
+          if ($null -ne $project -and $null -ne $project.identity -and -not [string]::IsNullOrWhiteSpace($project.identity.principalId)) {
+            $foundryProjectPrincipalId = $project.identity.principalId
+            Write-Info "Foundry project principalId: $foundryProjectPrincipalId"
+          }
+          else {
+            Write-WarnLine "Foundry project principalId was empty. Cannot assign Search Service Contributor automatically."
+          }
+        }
+        catch {
+          Write-WarnLine "Could not resolve Foundry project principalId. Details: $($_.Exception.Message)"
+        }
+      }
     }
   }
 }
 else {
   Write-Info "Skipping Foundry project creation."
+}
+
+if (-not $SkipRbac) {
+  if (-not [string]::IsNullOrWhiteSpace($foundryProjectPrincipalId)) {
+    Ensure-RoleAssignment -PrincipalId $foundryProjectPrincipalId -PrincipalType "ServicePrincipal" -RoleName "Search Service Contributor" -Scope $searchServiceId
+  }
+  elseif (-not $SkipFoundryProject) {
+    Write-WarnLine "Foundry project principalId is unavailable. Search Service Contributor was not assigned."
+  }
 }
 
 if (-not $SkipSearchObjects) {
@@ -416,7 +470,7 @@ if (-not $SkipSearchObjects) {
     $textVectorField = $existingIndex.fields | Where-Object { $_.name -eq "text_vector" } | Select-Object -First 1
     $hasVectorFieldConfig = $null -ne $textVectorField -and $null -ne $textVectorField.dimensions -and -not [string]::IsNullOrWhiteSpace($textVectorField.vectorSearchProfile)
 
-    $indexCompatible = ($missing.Count -eq 0) -and $hasVectorFieldConfig
+    $indexCompatible = (@($missing).Count -eq 0) -and $hasVectorFieldConfig
 
     if (-not $indexCompatible) {
       if ($DisableAutoVersionOnIncompatibleIndex) {

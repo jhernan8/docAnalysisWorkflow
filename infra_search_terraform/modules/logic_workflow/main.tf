@@ -75,6 +75,11 @@ resource "azurerm_logic_app_workflow" "this" {
         connectionId   = local.blob_connection_id
         connectionName = var.blob_connection_name
         id             = local.azureblob_managed_api_id
+        connectionProperties = {
+          authentication = {
+            type = "ManagedServiceIdentity"
+          }
+        }
       }
       sharepointonline = {
         connectionId   = azurerm_api_connection.sharepoint.id
