@@ -192,10 +192,16 @@ $accessPolicyBody = @{
     }
 } | ConvertTo-Json -Depth 5 -Compress
 
+# Write body to a temp file to avoid PowerShell/az CLI quoting issues on Windows
+$accessPolicyFile = Join-Path $env:TEMP "access-policy-$PID.json"
+$accessPolicyBody | Set-Content -Path $accessPolicyFile -Encoding UTF8
+
 $SUBSCRIPTION_ID_AP = (az account show --query id -o tsv).Trim()
 $accessPolicyUri = "https://management.azure.com/subscriptions/$SUBSCRIPTION_ID_AP/resourceGroups/$RESOURCE_GROUP/providers/Microsoft.Web/connections/$SP_CONN_NAME/accessPolicies/${SP_CONN_NAME}-policy?api-version=2016-06-01"
 
-az rest --method PUT --uri $accessPolicyUri --body $accessPolicyBody --headers "Content-Type=application/json"
+az rest --method PUT --uri $accessPolicyUri --body "@$accessPolicyFile" --headers "Content-Type=application/json"
+
+Remove-Item -Path $accessPolicyFile -Force -ErrorAction SilentlyContinue
 if ($LASTEXITCODE -ne 0) {
     Write-Host "  WARNING: Could not create access policy. You may need to authorize the connection manually." -ForegroundColor Red
     Write-Host "  See 'Remaining Manual Steps' at the end." -ForegroundColor Red
