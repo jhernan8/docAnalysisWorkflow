@@ -195,7 +195,7 @@ $accessPolicyBody = @{
 $SUBSCRIPTION_ID_AP = (az account show --query id -o tsv).Trim()
 $accessPolicyUri = "https://management.azure.com/subscriptions/$SUBSCRIPTION_ID_AP/resourceGroups/$RESOURCE_GROUP/providers/Microsoft.Web/connections/$SP_CONN_NAME/accessPolicies/${SP_CONN_NAME}-policy?api-version=2016-06-01"
 
-az rest --method PUT --uri $accessPolicyUri --body $accessPolicyBody
+az rest --method PUT --uri $accessPolicyUri --body $accessPolicyBody --headers "Content-Type=application/json"
 if ($LASTEXITCODE -ne 0) {
     Write-Host "  WARNING: Could not create access policy. You may need to authorize the connection manually." -ForegroundColor Red
     Write-Host "  See 'Remaining Manual Steps' at the end." -ForegroundColor Red
