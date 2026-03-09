@@ -14,9 +14,15 @@ provider "azurerm" {
   features {}
 }
 
+resource "azurerm_resource_group" "main" {
+  name     = var.resource_group_name
+  location = var.location_primary
+  tags     = local.common_tags
+}
+
 module "ai_services" {
   source                              = "./modules/ai_services"
-  resource_group_name                 = var.resource_group_name
+  resource_group_name                 = azurerm_resource_group.main.name
   location                            = var.location_primary
   admin_ai_name                       = var.admin_ai_name
   admin_ai_custom_subdomain_name      = var.admin_ai_custom_subdomain_name
@@ -34,7 +40,7 @@ module "ai_services" {
 
 module "search_service" {
   source                               = "./modules/search_service"
-  resource_group_name                  = var.resource_group_name
+  resource_group_name                  = azurerm_resource_group.main.name
   location                             = var.location_primary
   search_service_name                  = var.search_service_name
   sku                                  = var.search_sku
@@ -52,7 +58,7 @@ module "search_service" {
 
 module "storage_account" {
   source                            = "./modules/storage_account"
-  resource_group_name               = var.resource_group_name
+  resource_group_name               = azurerm_resource_group.main.name
   location                          = var.location_secondary
   storage_account_name              = var.storage_account_name
   account_tier                      = var.storage_account_tier
@@ -73,7 +79,7 @@ module "storage_account" {
 
 module "eventgrid_topic" {
   source                = "./modules/eventgrid_topic"
-  resource_group_name   = var.resource_group_name
+  resource_group_name   = azurerm_resource_group.main.name
   location              = var.location_secondary
   eventgrid_topic_name  = var.eventgrid_topic_name
   source_resource_id    = module.storage_account.storage_account_id
@@ -83,7 +89,7 @@ module "eventgrid_topic" {
 
 module "logic_workflow" {
   source                          = "./modules/logic_workflow"
-  resource_group_name             = var.resource_group_name
+  resource_group_name             = azurerm_resource_group.main.name
   location                        = var.location_secondary
   subscription_id                 = var.subscription_id
   logic_app_name                  = var.logic_app_name
@@ -104,7 +110,7 @@ module "private_endpoints" {
   private_dns_zone_ids        = var.private_dns_zone_ids
   private_endpoint_subnet_id  = var.private_endpoint_subnet_id
   private_dns_vnet_id         = var.private_dns_vnet_id
-  resource_group_name         = var.resource_group_name
+  resource_group_name         = azurerm_resource_group.main.name
   location                    = var.location_secondary
   name_prefix                 = var.private_endpoint_name_prefix
   storage_account_id          = module.storage_account.storage_account_id

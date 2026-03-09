@@ -197,8 +197,13 @@ function Invoke-AzRestChecked(
       $args += @("--headers", "Content-Type=application/json", "--body", "@$BodyFile")
     }
 
+    $prevEAP = $ErrorActionPreference
+    $ErrorActionPreference = "SilentlyContinue"
     $result = & az @args 2>&1
-    if ($LASTEXITCODE -eq 0) {
+    $exitCode = $LASTEXITCODE
+    $ErrorActionPreference = $prevEAP
+
+    if ($exitCode -eq 0) {
       return
     }
 
@@ -443,9 +448,10 @@ else {
 if (-not $SkipRbac) {
   if (-not [string]::IsNullOrWhiteSpace($foundryProjectPrincipalId)) {
     Ensure-RoleAssignment -PrincipalId $foundryProjectPrincipalId -PrincipalType "ServicePrincipal" -RoleName "Search Service Contributor" -Scope $searchServiceId
+    Ensure-RoleAssignment -PrincipalId $foundryProjectPrincipalId -PrincipalType "ServicePrincipal" -RoleName "Search Index Data Contributor" -Scope $searchServiceId
   }
   elseif (-not $SkipFoundryProject) {
-    Write-WarnLine "Foundry project principalId is unavailable. Search Service Contributor was not assigned."
+    Write-WarnLine "Foundry project principalId is unavailable. Search Service Contributor / Search Index Data Contributor was not assigned."
   }
 }
 
@@ -459,8 +465,12 @@ if (-not $SkipSearchObjects) {
   $effectiveDataSourceName = $DataSourceName
   $effectiveIndexerName = $IndexerName
 
+  $prevEAP = $ErrorActionPreference
+  $ErrorActionPreference = "SilentlyContinue"
   $existingIndexRaw = az rest --method GET --uri "$searchEndpoint/indexes/${IndexName}?api-version=${apiVersion}" --resource "https://search.azure.com" --only-show-errors 2>$null
-  if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($existingIndexRaw)) {
+  $indexCheckExit = $LASTEXITCODE
+  $ErrorActionPreference = $prevEAP
+  if ($indexCheckExit -eq 0 -and -not [string]::IsNullOrWhiteSpace($existingIndexRaw)) {
     $existingIndex = $existingIndexRaw | ConvertFrom-Json
 
     $existingFieldNames = @($existingIndex.fields | ForEach-Object { $_.name })
@@ -636,7 +646,7 @@ if (-not $SkipSearchObjects) {
   Invoke-SearchPut -Uri "$searchEndpoint/indexers/${effectiveIndexerName}?api-version=${apiVersion}" -Body $indexerBody -MaxAttempts 4 -DelaySeconds 30
   Write-Ok "Indexer ensured: $effectiveIndexerName"
 
-  Invoke-AzRestChecked -Method "POST" -Uri "$searchEndpoint/indexers/${effectiveIndexerName}/run?api-version=${apiVersion}" -Resource "https://search.azure.com" -BodyFile ""
+  Invoke-AzRestChecked -Method "POST" -Uri "$searchEndpoint/indexers/${effectiveIndexerName}/run?api-version=${apiVersion}" -Resource "https://search.azure.com" -MaxAttempts 3 -DelaySeconds 15
   Write-Ok "Indexer run started: $effectiveIndexerName"
 }
 else {
