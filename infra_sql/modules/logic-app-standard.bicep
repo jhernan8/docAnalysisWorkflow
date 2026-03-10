@@ -43,18 +43,20 @@ resource appServicePlan 'Microsoft.Web/serverfarms@2023-12-01' = {
   }
 }
 
-// API Connection for SharePoint Online
+// API Connection for SharePoint Online (V2 - supports access policies & managed identity)
 // Note: OAuth consent must be done in Azure Portal after deployment
-// Access policy is created via az rest in deploy.ps1 (stable API, not supported in Bicep with 2016-06-01)
-resource sharePointConnection 'Microsoft.Web/connections@2016-06-01' = {
+// Access policy is created via az rest in deploy.ps1
+resource sharePointConnection 'Microsoft.Web/connections@2018-07-01-preview' = {
   name: '${logicAppName}-sharepoint-connection'
   location: location
   tags: tags
+  kind: 'V2'
   properties: {
     displayName: 'SharePoint Connection for Contract Analysis'
     api: {
       id: subscriptionResourceId('Microsoft.Web/locations/managedApis', location, 'sharepointonline')
     }
+    parameterValueType: 'Alternative'
   }
 }
 
