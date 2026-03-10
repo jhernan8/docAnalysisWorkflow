@@ -240,8 +240,10 @@ if ($StartFromStep -le 3) {
 
 # Extract Logic App name and SharePoint connection for Step 4
 $resourcePrefix = "$BASE_NAME-$ENVIRONMENT"
-$LOGIC_APP_NAME = (az deployment group show -g $RESOURCE_GROUP -n main --query "properties.outputs.logicAppName.value" -o tsv 2>$null).Trim()
-$SHAREPOINT_CONNECTION = (az deployment group show -g $RESOURCE_GROUP -n main --query "properties.outputs.sharePointConnectionName.value" -o tsv 2>$null).Trim()
+$LOGIC_APP_NAME = (az deployment group show -g $RESOURCE_GROUP -n main --query "properties.outputs.logicAppName.value" -o tsv 2>$null)
+if ($LOGIC_APP_NAME) { $LOGIC_APP_NAME = $LOGIC_APP_NAME.Trim() }
+$SHAREPOINT_CONNECTION = (az deployment group show -g $RESOURCE_GROUP -n main --query "properties.outputs.sharePointConnectionName.value" -o tsv 2>$null)
+if ($SHAREPOINT_CONNECTION) { $SHAREPOINT_CONNECTION = $SHAREPOINT_CONNECTION.Trim() }
 
 # Fallback: discover from resource group if deployment outputs are empty
 if (-not $LOGIC_APP_NAME) {
@@ -271,7 +273,8 @@ $WORKFLOW_TRIGGER_DIR = Join-Path $WORKFLOW_DIR "contract-trigger"
 New-Item -ItemType Directory -Path $WORKFLOW_TRIGGER_DIR -Force | Out-Null
 
 # Get app settings values
-$FUNC_HOSTNAME = (az deployment group show -g $RESOURCE_GROUP -n main --query "properties.outputs.functionAppUrl.value" -o tsv 2>$null).Trim() -replace '^https://', ''
+$FUNC_HOSTNAME = (az deployment group show -g $RESOURCE_GROUP -n main --query "properties.outputs.functionAppUrl.value" -o tsv 2>$null)
+if ($FUNC_HOSTNAME) { $FUNC_HOSTNAME = $FUNC_HOSTNAME.Trim() -replace '^https://', '' }
 if (-not $FUNC_HOSTNAME) {
     $FUNC_HOSTNAME = (az functionapp show -g $RESOURCE_GROUP -n $FUNCTION_APP_NAME --query "defaultHostName" -o tsv).Trim()
 }
