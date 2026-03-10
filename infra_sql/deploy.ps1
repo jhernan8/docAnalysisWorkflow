@@ -259,16 +259,32 @@ if (-not $SHAREPOINT_CONNECTION) {
 Write-Host "`nStep 4: Deploying Logic App Standard workflow..." -ForegroundColor Yellow
 
 # Get Function key for the Logic App workflow to call Function App
+# Temporarily relax error handling — this call fails when public access is disabled (expected)
 Write-Host "  Retrieving Function App key..." -ForegroundColor Gray
-$funcKeyOutput = az functionapp keys list -g $RESOURCE_GROUP -n $FUNCTION_APP_NAME --query "functionKeys.default" -o tsv 2>&1
-if ($LASTEXITCODE -ne 0 -or -not $funcKeyOutput) {
+$prevEAP = $ErrorActionPreference
+$ErrorActionPreference = "Continue"
+$funcKeyOutput = az functionapp keys list -g $RESOURCE_GROUP -n $FUNCTION_APP_NAME --query "functionKeys.default" -o tsv 2>$null
+$funcKeyExitCode = $LASTEXITCODE
+$ErrorActionPreference = $prevEAP
+
+if ($funcKeyExitCode -ne 0 -or -not $funcKeyOutput) {
     Write-Host "  WARNING: Could not retrieve Function App key (public access may be disabled)." -ForegroundColor Red
-    Write-Host "  You can retrieve it manually later:" -ForegroundColor Red
-    Write-Host "    az functionapp keys list -g $RESOURCE_GROUP -n $FUNCTION_APP_NAME --query functionKeys.default -o tsv" -ForegroundColor Red
-    Write-Host "  Continuing with placeholder..." -ForegroundColor Red
-    $FUNCTION_KEY = "REPLACE_WITH_FUNCTION_KEY"
-} else {
+    Write-Host "  Temporarily enabling public access to retrieve the key..." -ForegroundColor Yellow
+    az functionapp update -g $RESOURCE_GROUP -n $FUNCTION_APP_NAME --set publicNetworkAccess=Enabled --output none 2>$null
+    Start-Sleep -Seconds 5
+    $funcKeyOutput = az functionapp keys list -g $RESOURCE_GROUP -n $FUNCTION_APP_NAME --query "functionKeys.default" -o tsv 2>$null
+    az functionapp update -g $RESOURCE_GROUP -n $FUNCTION_APP_NAME --set publicNetworkAccess=Disabled --output none 2>$null
+    Write-Host "  Public access re-disabled." -ForegroundColor Gray
+}
+
+if ($funcKeyOutput) {
     $FUNCTION_KEY = "$funcKeyOutput".Trim()
+    Write-Host "  [OK] Function key retrieved" -ForegroundColor Green
+} else {
+    Write-Host "  WARNING: Still could not retrieve Function App key." -ForegroundColor Red
+    Write-Host "  Retrieve manually and update the Logic App workflow:" -ForegroundColor Red
+    Write-Host "    az functionapp keys list -g $RESOURCE_GROUP -n $FUNCTION_APP_NAME --query functionKeys.default -o tsv" -ForegroundColor Red
+    $FUNCTION_KEY = "REPLACE_WITH_FUNCTION_KEY"
 }
 
 # Get SharePoint connection details
