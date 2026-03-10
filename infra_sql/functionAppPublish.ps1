@@ -1,19 +1,18 @@
 # ============================================================================
 # Contract Analysis Solution - Function App Publish Script
 #
-# Publishes Function App code to Azure. Run this AFTER deploy.ps1 has
-# completed infrastructure deployment.
+# Publishes Function App code to Azure via ARM zip deploy (management plane).
+# This avoids DNS resolution issues with private endpoints — the func CLI
+# connects to *.scm.azurewebsites.net which doesn't resolve outside the VNet.
 #
 # Prerequisites:
-#   - Azure Functions Core Tools (func) installed
-#     Install: winget install Microsoft.Azure.FunctionsCoreTools
 #   - az CLI logged in to the correct subscription
 #   - deploy.ps1 has been run successfully (infrastructure exists)
 #
 # After this script, run logicAppDesign.ps1 to deploy the Logic App workflow.
 #
 # Usage:
-#   .\functionAppDeploy.ps1
+#   .\functionAppPublish.ps1
 # ============================================================================
 
 $ErrorActionPreference = "Stop"
@@ -30,11 +29,6 @@ if (-not (Test-Path $configPath)) {
 }
 Write-Host "Loading configuration from deploy.config.ps1..." -ForegroundColor Yellow
 . $configPath
-
-# Verify func CLI is available
-if (-not (Get-Command func -ErrorAction SilentlyContinue)) {
-    throw "Azure Functions Core Tools (func) not found. Install with: winget install Microsoft.Azure.FunctionsCoreTools"
-}
 
 # ============================================================================
 # Step 1: Discover Function App and Storage Account
@@ -66,36 +60,54 @@ Write-Host "  Function App: $FUNCTION_APP_NAME" -ForegroundColor Gray
 Write-Host "  Storage:      $STORAGE_ACCOUNT" -ForegroundColor Gray
 
 # ============================================================================
-# Step 2: Enable public access and publish Function App code
+# Step 2: Deploy Function App code via ARM zip deploy
 # ============================================================================
 Write-Host "`nStep 2: Publishing Function App code..." -ForegroundColor Yellow
+
+# Enable Oryx build on the server so dependencies (requirements.txt) are
+# installed during deployment — this replaces what `func publish --python` did.
+Write-Host "  Configuring remote build settings..." -ForegroundColor Gray
+az functionapp config appsettings set -g $RESOURCE_GROUP -n $FUNCTION_APP_NAME --settings `
+    ENABLE_ORYX_BUILD=true `
+    SCM_DO_BUILD_DURING_DEPLOYMENT=true `
+    --output none
 
 # Temporarily enable storage public access for deployment
 Write-Host "  Enabling storage public access for deployment..." -ForegroundColor Gray
 az storage account update -g $RESOURCE_GROUP -n $STORAGE_ACCOUNT --public-network-access Enabled --output none
 
-# Temporarily enable Function App public access for deployment
-Write-Host "  Enabling Function App public access for deployment..." -ForegroundColor Gray
-az functionapp update -g $RESOURCE_GROUP -n $FUNCTION_APP_NAME --set publicNetworkAccess=Enabled --output none
+# Create deployment zip from function source code
+$funcSourceDir = Join-Path $PSScriptRoot "..\azure_function_sql"
+$zipPath = Join-Path $env:TEMP "func-deploy-$PID.zip"
+if (Test-Path $zipPath) { Remove-Item $zipPath -Force }
+Write-Host "  Zipping function code from $funcSourceDir ..." -ForegroundColor Gray
+Compress-Archive -Path (Join-Path $funcSourceDir "*") -DestinationPath $zipPath -Force
 
-Push-Location (Join-Path $PSScriptRoot "..\azure_function_sql")
-func azure functionapp publish $FUNCTION_APP_NAME --python
+# Deploy via management plane (management.azure.com) — avoids SCM DNS resolution
+# issues caused by privatelink.azurewebsites.net CNAME chain
+Write-Host "  Deploying via ARM zip deploy (management plane)..." -ForegroundColor Gray
+az functionapp deployment source config-zip `
+    -g $RESOURCE_GROUP `
+    -n $FUNCTION_APP_NAME `
+    --src $zipPath `
+    --output none
+
 if ($LASTEXITCODE -ne 0) {
-    Pop-Location
+    Remove-Item $zipPath -Force -ErrorAction SilentlyContinue
     throw "Failed to publish Function App"
 }
-Pop-Location
+
+Remove-Item $zipPath -Force -ErrorAction SilentlyContinue
 Write-Host "[OK] Function code deployed" -ForegroundColor Green
 
 # ============================================================================
-# Step 3: Re-disable public access
+# Step 3: Re-disable storage public access
 # ============================================================================
-Write-Host "`nStep 3: Re-securing resources..." -ForegroundColor Yellow
+Write-Host "`nStep 3: Re-securing storage..." -ForegroundColor Yellow
 
 az storage account update -g $RESOURCE_GROUP -n $STORAGE_ACCOUNT --public-network-access Disabled --output none
-az functionapp update -g $RESOURCE_GROUP -n $FUNCTION_APP_NAME --set publicNetworkAccess=Disabled --output none
 
-Write-Host "[OK] Public access re-disabled on Storage and Function App" -ForegroundColor Green
+Write-Host "[OK] Storage public access re-disabled" -ForegroundColor Green
 
 # ============================================================================
 # Done
