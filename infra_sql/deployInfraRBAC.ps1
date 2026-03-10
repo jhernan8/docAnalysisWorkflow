@@ -1,14 +1,17 @@
 # ============================================================================
-# Contract Analysis Solution - Deployment Script (v2 - Private Endpoints)
+# Contract Analysis Solution - Infrastructure Deployment Script (Private Endpoints)
 # PowerShell version for Windows
 #
+# This script deploys the Azure infrastructure (Step 1: Resource Group, Step 2: Bicep).
+# After this script completes, run functionAppDeploy.ps1 to deploy the Function App
+# code and Logic App workflow.
+#
 # Usage:
-#   .\deploy.ps1                  # Run all steps (1-4)
-#   .\deploy.ps1 -StartFromStep 3  # Skip Steps 1-2, start from Step 3
-#   .\deploy.ps1 -StartFromStep 4  # Skip Steps 1-3, start from Step 4
+#   .\deploy.ps1                  # Run all steps (1-2)
+#   .\deploy.ps1 -StartFromStep 2 # Skip Step 1, start from Step 2
 # ============================================================================
 param(
-    [ValidateRange(1,4)]
+    [ValidateRange(1,2)]
     [int]$StartFromStep = 1
 )
 
@@ -169,7 +172,7 @@ if ($StartFromStep -le 2) {
     Write-Host "`nStep 2: SKIPPED (Bicep deployment)" -ForegroundColor DarkGray
 }
 
-# Extract outputs from existing deployment (needed by Steps 3-4 regardless of skip)
+# Extract outputs from existing deployment (needed regardless of skip)
 Write-Host "  Extracting deployment outputs..." -ForegroundColor Yellow
 $deploymentJson = az deployment group show -g $RESOURCE_GROUP -n main -o json 2>&1
 if ($LASTEXITCODE -eq 0) {
@@ -178,6 +181,8 @@ if ($LASTEXITCODE -eq 0) {
     $SQL_SERVER = $deployment.properties.outputs.sqlServerFqdn.value
     $SQL_DATABASE = $deployment.properties.outputs.sqlDatabaseName.value
     $STORAGE_ACCOUNT = $deployment.properties.outputs.storageAccountName.value
+    $LOGIC_APP_NAME = $deployment.properties.outputs.logicAppName.value
+    $SHAREPOINT_CONNECTION = $deployment.properties.outputs.sharePointConnectionName.value
 }
 
 # If deployment outputs are empty (e.g. last deploy failed), discover resources directly
@@ -195,6 +200,8 @@ if (-not $FUNCTION_APP_NAME) {
     $sqlServerName = "$((az sql server list -g $RESOURCE_GROUP --query "[?starts_with(name,'$resourcePrefix-sql')].name | [0]" -o tsv))".Trim()
     $SQL_SERVER = if ($sqlServerName) { "$sqlServerName.database.windows.net" } else { "" }
     $SQL_DATABASE = "contractsdb"
+    $LOGIC_APP_NAME = "$((az resource list -g $RESOURCE_GROUP --resource-type 'Microsoft.Web/sites' --query "[?kind=='functionapp,linux,workflowapp'].name | [0]" -o tsv))".Trim()
+    $SHAREPOINT_CONNECTION = "$((az resource list -g $RESOURCE_GROUP --resource-type 'Microsoft.Web/connections' --query "[?starts_with(name,'$resourcePrefix')].name | [0]" -o tsv))".Trim()
 }
 
 if (-not $FUNCTION_APP_NAME) {
@@ -208,218 +215,10 @@ Write-Host "  Storage:      $STORAGE_ACCOUNT" -ForegroundColor Gray
 # See 'Remaining Manual Steps' -> 'Authorize SharePoint Connection' at the end of this script.
 
 # ============================================================================
-# Step 3: Deploy Function App code
-# ============================================================================
-if ($StartFromStep -le 3) {
-    Write-Host "`nStep 3: Deploying Function App code..." -ForegroundColor Yellow
-    Write-Host "  Storage public access is enabled (from Bicep) for deployment..." -ForegroundColor Yellow
-
-    Push-Location ..\azure_function_sql
-    func azure functionapp publish $FUNCTION_APP_NAME --python
-    if ($LASTEXITCODE -ne 0) {
-        Pop-Location
-        throw "Failed to publish Function App"
-    }
-    Pop-Location
-
-    Write-Host "  Re-disabling storage public access..." -ForegroundColor Yellow
-    $storageDisableArgs = @(
-        'storage', 'account', 'update',
-        '-g', $RESOURCE_GROUP,
-        '-n', $STORAGE_ACCOUNT,
-        '--public-network-access', 'Disabled',
-        '--output', 'none'
-    )
-    az @storageDisableArgs
-
-    if ($LASTEXITCODE -ne 0) { throw "Failed to disable storage public access" }
-    Write-Host "[OK] Function code deployed - storage re-secured" -ForegroundColor Green
-} else {
-    Write-Host "`nStep 3: SKIPPED (Function App code)" -ForegroundColor DarkGray
-}
-
-# Extract Logic App name and SharePoint connection for Step 4
-$resourcePrefix = "$BASE_NAME-$ENVIRONMENT"
-$LOGIC_APP_NAME = (az deployment group show -g $RESOURCE_GROUP -n main --query "properties.outputs.logicAppName.value" -o tsv 2>$null)
-if ($LOGIC_APP_NAME) { $LOGIC_APP_NAME = $LOGIC_APP_NAME.Trim() }
-$SHAREPOINT_CONNECTION = (az deployment group show -g $RESOURCE_GROUP -n main --query "properties.outputs.sharePointConnectionName.value" -o tsv 2>$null)
-if ($SHAREPOINT_CONNECTION) { $SHAREPOINT_CONNECTION = $SHAREPOINT_CONNECTION.Trim() }
-
-# Fallback: discover from resource group if deployment outputs are empty
-if (-not $LOGIC_APP_NAME) {
-    $LOGIC_APP_NAME = "$((az resource list -g $RESOURCE_GROUP --resource-type 'Microsoft.Web/sites' --query "[?kind=='functionapp,linux,workflowapp'].name | [0]" -o tsv))".Trim()
-}
-if (-not $SHAREPOINT_CONNECTION) {
-    $SHAREPOINT_CONNECTION = "$((az resource list -g $RESOURCE_GROUP --resource-type 'Microsoft.Web/connections' --query "[?starts_with(name,'$resourcePrefix')].name | [0]" -o tsv))".Trim()
-}
-
-# ============================================================================
-# Step 4: Deploy Logic App Standard workflow
-# ============================================================================
-Write-Host "`nStep 4: Deploying Logic App Standard workflow..." -ForegroundColor Yellow
-
-# Get Function key for the Logic App workflow to call Function App
-# Temporarily relax error handling — this call fails when public access is disabled (expected)
-Write-Host "  Retrieving Function App key..." -ForegroundColor Gray
-$prevEAP = $ErrorActionPreference
-$ErrorActionPreference = "Continue"
-$funcKeyOutput = az functionapp keys list -g $RESOURCE_GROUP -n $FUNCTION_APP_NAME --query "functionKeys.default" -o tsv 2>$null
-$funcKeyExitCode = $LASTEXITCODE
-$ErrorActionPreference = $prevEAP
-
-if ($funcKeyExitCode -ne 0 -or -not $funcKeyOutput) {
-    Write-Host "  WARNING: Could not retrieve Function App key (public access may be disabled)." -ForegroundColor Red
-    Write-Host "  Temporarily enabling public access to retrieve the key..." -ForegroundColor Yellow
-    az functionapp update -g $RESOURCE_GROUP -n $FUNCTION_APP_NAME --set publicNetworkAccess=Enabled --output none 2>$null
-    Start-Sleep -Seconds 5
-    $funcKeyOutput = az functionapp keys list -g $RESOURCE_GROUP -n $FUNCTION_APP_NAME --query "functionKeys.default" -o tsv 2>$null
-    az functionapp update -g $RESOURCE_GROUP -n $FUNCTION_APP_NAME --set publicNetworkAccess=Disabled --output none 2>$null
-    Write-Host "  Public access re-disabled." -ForegroundColor Gray
-}
-
-if ($funcKeyOutput) {
-    $FUNCTION_KEY = "$funcKeyOutput".Trim()
-    Write-Host "  [OK] Function key retrieved" -ForegroundColor Green
-} else {
-    Write-Host "  WARNING: Still could not retrieve Function App key." -ForegroundColor Red
-    Write-Host "  Retrieve manually and update the Logic App workflow:" -ForegroundColor Red
-    Write-Host "    az functionapp keys list -g $RESOURCE_GROUP -n $FUNCTION_APP_NAME --query functionKeys.default -o tsv" -ForegroundColor Red
-    $FUNCTION_KEY = "REPLACE_WITH_FUNCTION_KEY"
-}
-
-# Get SharePoint connection details
-$SUBSCRIPTION_ID = "$((az account show --query id -o tsv))".Trim()
-$SP_CONNECTION_RUNTIME_URL = "$((az resource show -g $RESOURCE_GROUP --resource-type 'Microsoft.Web/connections' -n $SHAREPOINT_CONNECTION --query 'properties.connectionRuntimeUrl' -o tsv))".Trim()
-$SP_CONNECTION_ID = "$((az resource show -g $RESOURCE_GROUP --resource-type 'Microsoft.Web/connections' -n $SHAREPOINT_CONNECTION --query id -o tsv))".Trim()
-$MANAGED_API_ID = "$((az resource show -g $RESOURCE_GROUP --resource-type 'Microsoft.Web/connections' -n $SHAREPOINT_CONNECTION --query 'properties.api.id' -o tsv))".Trim()
-
-# Create workflow directory structure
-$WORKFLOW_DIR = Join-Path $env:TEMP "logic-app-workflow-$PID"
-$WORKFLOW_TRIGGER_DIR = Join-Path $WORKFLOW_DIR "contract-trigger"
-New-Item -ItemType Directory -Path $WORKFLOW_TRIGGER_DIR -Force | Out-Null
-
-# Get app settings values
-$FUNC_HOSTNAME = (az deployment group show -g $RESOURCE_GROUP -n main --query "properties.outputs.functionAppUrl.value" -o tsv 2>$null)
-if ($FUNC_HOSTNAME) { $FUNC_HOSTNAME = $FUNC_HOSTNAME.Trim() -replace '^https://', '' }
-if (-not $FUNC_HOSTNAME) {
-    $FUNC_HOSTNAME = "$((az functionapp show -g $RESOURCE_GROUP -n $FUNCTION_APP_NAME --query 'defaultHostName' -o tsv))".Trim()
-}
-$SP_SITE_URL = $SHAREPOINT_SITE_URL
-$SP_LIBRARY_ID = $SHAREPOINT_LIBRARY_ID
-
-# Create connections.json using PowerShell objects (avoids here-string parsing issues)
-$connectionsObj = [ordered]@{
-    managedApiConnections = [ordered]@{
-        sharepointonline = [ordered]@{
-            api = [ordered]@{ id = $MANAGED_API_ID }
-            connection = [ordered]@{ id = $SP_CONNECTION_ID }
-            connectionRuntimeUrl = $SP_CONNECTION_RUNTIME_URL
-            authentication = [ordered]@{ type = "ManagedServiceIdentity" }
-        }
-    }
-}
-$connectionsObj | ConvertTo-Json -Depth 10 | Set-Content -Path (Join-Path $WORKFLOW_DIR "connections.json") -Encoding UTF8
-
-# Create workflow.json using PowerShell objects
-$spTriggerPath = '/datasets/@{encodeURIComponent(encodeURIComponent(''__SP_SITE_URL__''))}/tables/@{encodeURIComponent(encodeURIComponent(''__SP_LIBRARY_ID__''))}/onnewfileitems'
-$spTriggerPath = $spTriggerPath -replace '__SP_SITE_URL__', $SP_SITE_URL
-$spTriggerPath = $spTriggerPath -replace '__SP_LIBRARY_ID__', $SP_LIBRARY_ID
-$spGetFilePath = '/datasets/@{encodeURIComponent(encodeURIComponent(''__SP_SITE_URL__''))}/files/@{encodeURIComponent(triggerBody()?[''{Identifier}''])}/content'
-$spGetFilePath = $spGetFilePath -replace '__SP_SITE_URL__', $SP_SITE_URL
-$funcUri = 'https://' + $FUNC_HOSTNAME + '/api/analyze-and-store'
-
-$workflowObj = [ordered]@{
-    definition = [ordered]@{
-        '$schema' = "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#"
-        contentVersion = "1.0.0.0"
-        parameters = [ordered]@{
-            '$connections' = [ordered]@{
-                defaultValue = @{}
-                type = "Object"
-            }
-        }
-        triggers = [ordered]@{
-            When_a_file_is_created_properties_only = [ordered]@{
-                type = "ApiConnection"
-                inputs = [ordered]@{
-                    host = [ordered]@{
-                        connection = [ordered]@{ referenceName = "sharepointonline" }
-                    }
-                    method = "get"
-                    path = $spTriggerPath
-                }
-                recurrence = [ordered]@{
-                    frequency = "Minute"
-                    interval = 1
-                }
-                splitOn = '@triggerBody()?[''value'']'
-            }
-        }
-        actions = [ordered]@{
-            Get_file_content = [ordered]@{
-                type = "ApiConnection"
-                inputs = [ordered]@{
-                    host = [ordered]@{
-                        connection = [ordered]@{ referenceName = "sharepointonline" }
-                    }
-                    method = "get"
-                    path = $spGetFilePath
-                    queries = [ordered]@{ inferContentType = $true }
-                }
-                runAfter = @{}
-            }
-            Call_Function_App = [ordered]@{
-                type = "Http"
-                inputs = [ordered]@{
-                    method = "POST"
-                    uri = $funcUri
-                    headers = [ordered]@{ "x-functions-key" = $FUNCTION_KEY }
-                    body = [ordered]@{
-                        filename = '@{triggerBody()?[''{Name}'']}'
-                        content = '@{base64(body(''Get_file_content''))}'
-                    }
-                }
-                runAfter = [ordered]@{
-                    Get_file_content = @("Succeeded")
-                }
-                runtimeConfiguration = [ordered]@{
-                    contentTransfer = [ordered]@{ transferMode = "Chunked" }
-                }
-            }
-        }
-        outputs = @{}
-    }
-    kind = "Stateful"
-}
-$workflowObj | ConvertTo-Json -Depth 20 | Set-Content -Path (Join-Path $WORKFLOW_TRIGGER_DIR "workflow.json") -Encoding UTF8
-
-# Zip and deploy the workflow
-$zipPath = Join-Path $env:TEMP "logic-workflow-$PID.zip"
-if (Test-Path $zipPath) { Remove-Item $zipPath -Force }
-Compress-Archive -Path (Join-Path $WORKFLOW_DIR "*") -DestinationPath $zipPath -Force
-
-$logicDeployArgs = @(
-    'logicapp', 'deployment', 'source', 'config-zip',
-    '-g', $RESOURCE_GROUP,
-    '-n', $LOGIC_APP_NAME,
-    '--src', $zipPath,
-    '--output', 'none'
-)
-az @logicDeployArgs
-
-if ($LASTEXITCODE -ne 0) { throw "Failed to deploy Logic App workflow" }
-
-# Cleanup temp files
-Remove-Item -Path $WORKFLOW_DIR -Recurse -Force -ErrorAction SilentlyContinue
-Remove-Item -Path $zipPath -Force -ErrorAction SilentlyContinue
-
-Write-Host "[OK] Logic App workflow deployed" -ForegroundColor Green
-
-# ============================================================================
-# Deployment Complete
+# Infrastructure Deployment Complete
 # ============================================================================
 Write-Host "`n========================================" -ForegroundColor Green
-Write-Host "Deployment Complete!" -ForegroundColor Green
+Write-Host "Infrastructure Deployment Complete!" -ForegroundColor Green
 Write-Host "========================================" -ForegroundColor Green
 
 Write-Host "`nResource Details:" -ForegroundColor Yellow
@@ -437,7 +236,12 @@ Write-Host '  - Azure SQL Server'
 Write-Host '  - Function App (inbound)'
 Write-Host '  - Logic App Standard (inbound)'
 
-Write-Host "`nRemaining Manual Steps:" -ForegroundColor Yellow
+Write-Host "`nNext Steps (run in order):" -ForegroundColor Yellow
+Write-Host ""
+Write-Host "  Step A: .\functionAppDeploy.ps1   (publish Function App code)" -ForegroundColor Cyan
+Write-Host "  Step B: .\logicAppDesign.ps1      (deploy Logic App workflow)" -ForegroundColor Cyan
+Write-Host ""
+Write-Host "Remaining Manual Steps:" -ForegroundColor Yellow
 Write-Host ""
 Write-Host "1. Run SQL setup scripts (connect via Private Endpoint or from within VNet):"
 Write-Host "   a. Connect to: $SQL_SERVER / $SQL_DATABASE"
@@ -477,5 +281,5 @@ Write-Host "5. Test the solution"
 Write-Host "   - Upload a PDF contract to your SharePoint document library"
 
 Write-Host "`n========================================" -ForegroundColor Green
-Write-Host "All infrastructure is ready!" -ForegroundColor Green
+Write-Host "Infrastructure is ready!" -ForegroundColor Green
 Write-Host "========================================" -ForegroundColor Green
