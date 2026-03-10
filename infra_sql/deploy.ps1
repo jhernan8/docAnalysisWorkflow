@@ -1,7 +1,16 @@
 # ============================================================================
 # Contract Analysis Solution - Deployment Script (v2 - Private Endpoints)
 # PowerShell version for Windows
+#
+# Usage:
+#   .\deploy.ps1                  # Run all steps (1-4)
+#   .\deploy.ps1 -StartFromStep 3  # Skip Steps 1-2, start from Step 3
+#   .\deploy.ps1 -StartFromStep 4  # Skip Steps 1-3, start from Step 4
 # ============================================================================
+param(
+    [ValidateRange(1,4)]
+    [int]$StartFromStep = 1
+)
 
 $ErrorActionPreference = "Stop"
 # Prevent PowerShell from treating az CLI stderr output as terminating errors
@@ -84,75 +93,83 @@ if ([string]::IsNullOrEmpty($DNS_ZONE_RESOURCE_GROUP)) {
 # ============================================================================
 # Step 1: Create resource group
 # ============================================================================
-Write-Host "`nStep 1: Creating resource group..." -ForegroundColor Yellow
-$rgArgs = @(
-    'group', 'create',
-    '--name', $RESOURCE_GROUP,
-    '--location', $LOCATION,
-    '--output', 'none'
-)
-az @rgArgs
+if ($StartFromStep -le 1) {
+    Write-Host "`nStep 1: Creating resource group..." -ForegroundColor Yellow
+    $rgArgs = @(
+        'group', 'create',
+        '--name', $RESOURCE_GROUP,
+        '--location', $LOCATION,
+        '--output', 'none'
+    )
+    az @rgArgs
 
-if ($LASTEXITCODE -ne 0) { throw "Failed to create resource group" }
-Write-Host "[OK] Resource group created" -ForegroundColor Green
+    if ($LASTEXITCODE -ne 0) { throw "Failed to create resource group" }
+    Write-Host "[OK] Resource group created" -ForegroundColor Green
+} else {
+    Write-Host "`nStep 1: SKIPPED (resource group)" -ForegroundColor DarkGray
+}
 
 # ============================================================================
 # Step 2: Deploy Bicep template
 # ============================================================================
-Write-Host "`nStep 2: Deploying Bicep template..." -ForegroundColor Yellow
+if ($StartFromStep -le 2) {
+    Write-Host "`nStep 2: Deploying Bicep template..." -ForegroundColor Yellow
 
-# Pre-compile Bicep to ARM JSON locally so az deployment never invokes Bicep itself
-# (avoids any network calls for Bicep version checks or downloads)
-$armTemplatePath = Join-Path $PSScriptRoot "main.json"
-if ($env:AZURE_BICEP_PATH) {
-    Write-Host "  Pre-compiling main.bicep to ARM JSON using local Bicep..." -ForegroundColor Gray
-    & $env:AZURE_BICEP_PATH build (Join-Path $PSScriptRoot "main.bicep") --outfile $armTemplatePath
-    if ($LASTEXITCODE -ne 0) { throw "Bicep compilation failed" }
-    $templateFile = $armTemplatePath
-    Write-Host "  Compiled to: $armTemplatePath" -ForegroundColor Gray
+    # Pre-compile Bicep to ARM JSON locally so az deployment never invokes Bicep itself
+    # (avoids any network calls for Bicep version checks or downloads)
+    $armTemplatePath = Join-Path $PSScriptRoot "main.json"
+    if ($env:AZURE_BICEP_PATH) {
+        Write-Host "  Pre-compiling main.bicep to ARM JSON using local Bicep..." -ForegroundColor Gray
+        & $env:AZURE_BICEP_PATH build (Join-Path $PSScriptRoot "main.bicep") --outfile $armTemplatePath
+        if ($LASTEXITCODE -ne 0) { throw "Bicep compilation failed" }
+        $templateFile = $armTemplatePath
+        Write-Host "  Compiled to: $armTemplatePath" -ForegroundColor Gray
+    } else {
+        $templateFile = 'main.bicep'
+    }
+
+    $deployArgs = @(
+        'deployment', 'group', 'create',
+        '--resource-group', $RESOURCE_GROUP,
+        '--name', 'main',
+        '--template-file', $templateFile,
+        '--parameters',
+        "baseName=$BASE_NAME",
+        "location=$LOCATION",
+        "sqlLocation=$SQL_LOCATION",
+        "environment=$ENVIRONMENT",
+        "sqlAadAdminObjectId=$AAD_OBJECT_ID",
+        "sqlAadAdminDisplayName=$AAD_DISPLAY_NAME",
+        "sharePointSiteUrl=$SHAREPOINT_SITE_URL",
+        "sharePointLibraryId=$SHAREPOINT_LIBRARY_ID",
+        "vnetName=$VNET_NAME",
+        "vnetResourceGroupName=$VNET_RESOURCE_GROUP",
+        "privateEndpointSubnetAddressPrefix=$PE_SUBNET_PREFIX",
+        "vnetIntegrationSubnetAddressPrefix=$FUNC_SUBNET_PREFIX",
+        "logicAppSubnetAddressPrefix=$LOGIC_SUBNET_PREFIX",
+        "dnsZoneSubscriptionId=$DNS_ZONE_SUBSCRIPTION_ID",
+        "dnsZoneResourceGroupName=$DNS_ZONE_RESOURCE_GROUP",
+        '--output', 'none'
+    )
+    Write-Host "  Running: az $($deployArgs -join ' ')" -ForegroundColor Gray
+    az @deployArgs
+    $deployExitCode = $LASTEXITCODE
+
+    if ($deployExitCode -ne 0) {
+        Write-Host "  Bicep deployment returned exit code: $deployExitCode" -ForegroundColor Red
+        Write-Host "  Listing deployments in resource group..." -ForegroundColor Red
+        az deployment group list -g $RESOURCE_GROUP --query '[].{name:name, state:properties.provisioningState}' -o table
+        throw "Failed to deploy Bicep template - exit code: $deployExitCode"
+    }
+    Write-Host "[OK] Infrastructure deployed" -ForegroundColor Green
+
+    # Clean up compiled ARM template
+    if (Test-Path $armTemplatePath) { Remove-Item $armTemplatePath -Force -ErrorAction SilentlyContinue }
 } else {
-    $templateFile = 'main.bicep'
+    Write-Host "`nStep 2: SKIPPED (Bicep deployment)" -ForegroundColor DarkGray
 }
 
-$deployArgs = @(
-    'deployment', 'group', 'create',
-    '--resource-group', $RESOURCE_GROUP,
-    '--name', 'main',
-    '--template-file', $templateFile,
-    '--parameters',
-    "baseName=$BASE_NAME",
-    "location=$LOCATION",
-    "sqlLocation=$SQL_LOCATION",
-    "environment=$ENVIRONMENT",
-    "sqlAadAdminObjectId=$AAD_OBJECT_ID",
-    "sqlAadAdminDisplayName=$AAD_DISPLAY_NAME",
-    "sharePointSiteUrl=$SHAREPOINT_SITE_URL",
-    "sharePointLibraryId=$SHAREPOINT_LIBRARY_ID",
-    "vnetName=$VNET_NAME",
-    "vnetResourceGroupName=$VNET_RESOURCE_GROUP",
-    "privateEndpointSubnetAddressPrefix=$PE_SUBNET_PREFIX",
-    "vnetIntegrationSubnetAddressPrefix=$FUNC_SUBNET_PREFIX",
-    "logicAppSubnetAddressPrefix=$LOGIC_SUBNET_PREFIX",
-    "dnsZoneSubscriptionId=$DNS_ZONE_SUBSCRIPTION_ID",
-    "dnsZoneResourceGroupName=$DNS_ZONE_RESOURCE_GROUP",
-    '--output', 'none'
-)
-Write-Host "  Running: az $($deployArgs -join ' ')" -ForegroundColor Gray
-az @deployArgs
-$deployExitCode = $LASTEXITCODE
-
-if ($deployExitCode -ne 0) {
-    Write-Host "  Bicep deployment returned exit code: $deployExitCode" -ForegroundColor Red
-    Write-Host "  Listing deployments in resource group..." -ForegroundColor Red
-    az deployment group list -g $RESOURCE_GROUP --query '[].{name:name, state:properties.provisioningState}' -o table
-    throw "Failed to deploy Bicep template - exit code: $deployExitCode"
-}
-Write-Host "[OK] Infrastructure deployed" -ForegroundColor Green
-
-# Clean up compiled ARM template
-if (Test-Path $armTemplatePath) { Remove-Item $armTemplatePath -Force -ErrorAction SilentlyContinue }
-
-# Extract outputs
+# Extract outputs from existing deployment (needed by Steps 3-4 regardless of skip)
 Write-Host "  Extracting deployment outputs..." -ForegroundColor Yellow
 $deploymentJson = az deployment group show -g $RESOURCE_GROUP -n main -o json 2>&1
 if ($LASTEXITCODE -ne 0) {
@@ -180,29 +197,33 @@ Write-Host "  Storage:      $STORAGE_ACCOUNT" -ForegroundColor Gray
 # ============================================================================
 # Step 3: Deploy Function App code
 # ============================================================================
-Write-Host "`nStep 3: Deploying Function App code..." -ForegroundColor Yellow
-Write-Host "  Storage public access is enabled (from Bicep) for deployment..." -ForegroundColor Yellow
+if ($StartFromStep -le 3) {
+    Write-Host "`nStep 3: Deploying Function App code..." -ForegroundColor Yellow
+    Write-Host "  Storage public access is enabled (from Bicep) for deployment..." -ForegroundColor Yellow
 
-Push-Location ..\azure_function_sql
-func azure functionapp publish $FUNCTION_APP_NAME --python
-if ($LASTEXITCODE -ne 0) {
+    Push-Location ..\azure_function_sql
+    func azure functionapp publish $FUNCTION_APP_NAME --python
+    if ($LASTEXITCODE -ne 0) {
+        Pop-Location
+        throw "Failed to publish Function App"
+    }
     Pop-Location
-    throw "Failed to publish Function App"
+
+    Write-Host "  Re-disabling storage public access..." -ForegroundColor Yellow
+    $storageDisableArgs = @(
+        'storage', 'account', 'update',
+        '-g', $RESOURCE_GROUP,
+        '-n', $STORAGE_ACCOUNT,
+        '--public-network-access', 'Disabled',
+        '--output', 'none'
+    )
+    az @storageDisableArgs
+
+    if ($LASTEXITCODE -ne 0) { throw "Failed to disable storage public access" }
+    Write-Host "[OK] Function code deployed - storage re-secured" -ForegroundColor Green
+} else {
+    Write-Host "`nStep 3: SKIPPED (Function App code)" -ForegroundColor DarkGray
 }
-Pop-Location
-
-Write-Host "  Re-disabling storage public access..." -ForegroundColor Yellow
-$storageDisableArgs = @(
-    'storage', 'account', 'update',
-    '-g', $RESOURCE_GROUP,
-    '-n', $STORAGE_ACCOUNT,
-    '--public-network-access', 'Disabled',
-    '--output', 'none'
-)
-az @storageDisableArgs
-
-if ($LASTEXITCODE -ne 0) { throw "Failed to disable storage public access" }
-Write-Host "[OK] Function code deployed - storage re-secured" -ForegroundColor Green
 
 # Extract Logic App name for final output
 $LOGIC_APP_NAME = (az deployment group show -g $RESOURCE_GROUP -n main --query "properties.outputs.logicAppName.value" -o tsv).Trim()
