@@ -190,9 +190,9 @@ if (-not $FUNCTION_APP_NAME) {
 
     # Query by resource type and naming pattern from config
     $resourcePrefix = "$BASE_NAME-$ENVIRONMENT"
-    $FUNCTION_APP_NAME = (az functionapp list -g $RESOURCE_GROUP --query "[?starts_with(name,'$resourcePrefix-func')].name | [0]" -o tsv).Trim()
-    $STORAGE_ACCOUNT = (az storage account list -g $RESOURCE_GROUP --query "[?starts_with(name,'$($BASE_NAME)$($ENVIRONMENT)')].name | [0]" -o tsv).Trim()
-    $sqlServerName = (az sql server list -g $RESOURCE_GROUP --query "[?starts_with(name,'$resourcePrefix-sql')].name | [0]" -o tsv).Trim()
+    $FUNCTION_APP_NAME = "$((az functionapp list -g $RESOURCE_GROUP --query "[?starts_with(name,'$resourcePrefix-func')].name | [0]" -o tsv))".Trim()
+    $STORAGE_ACCOUNT = "$((az storage account list -g $RESOURCE_GROUP --query "[?starts_with(name,'$($BASE_NAME)$($ENVIRONMENT)')].name | [0]" -o tsv))".Trim()
+    $sqlServerName = "$((az sql server list -g $RESOURCE_GROUP --query "[?starts_with(name,'$resourcePrefix-sql')].name | [0]" -o tsv))".Trim()
     $SQL_SERVER = if ($sqlServerName) { "$sqlServerName.database.windows.net" } else { "" }
     $SQL_DATABASE = "contractsdb"
 }
@@ -247,10 +247,10 @@ if ($SHAREPOINT_CONNECTION) { $SHAREPOINT_CONNECTION = $SHAREPOINT_CONNECTION.Tr
 
 # Fallback: discover from resource group if deployment outputs are empty
 if (-not $LOGIC_APP_NAME) {
-    $LOGIC_APP_NAME = (az resource list -g $RESOURCE_GROUP --resource-type "Microsoft.Web/sites" --query "[?kind=='functionapp,linux,workflowapp'].name | [0]" -o tsv).Trim()
+    $LOGIC_APP_NAME = "$((az resource list -g $RESOURCE_GROUP --resource-type 'Microsoft.Web/sites' --query "[?kind=='functionapp,linux,workflowapp'].name | [0]" -o tsv))".Trim()
 }
 if (-not $SHAREPOINT_CONNECTION) {
-    $SHAREPOINT_CONNECTION = (az resource list -g $RESOURCE_GROUP --resource-type "Microsoft.Web/connections" --query "[?starts_with(name,'$resourcePrefix')].name | [0]" -o tsv).Trim()
+    $SHAREPOINT_CONNECTION = "$((az resource list -g $RESOURCE_GROUP --resource-type 'Microsoft.Web/connections' --query "[?starts_with(name,'$resourcePrefix')].name | [0]" -o tsv))".Trim()
 }
 
 # ============================================================================
@@ -259,13 +259,23 @@ if (-not $SHAREPOINT_CONNECTION) {
 Write-Host "`nStep 4: Deploying Logic App Standard workflow..." -ForegroundColor Yellow
 
 # Get Function key for the Logic App workflow to call Function App
-$FUNCTION_KEY = (az functionapp keys list -g $RESOURCE_GROUP -n $FUNCTION_APP_NAME --query "functionKeys.default" -o tsv).Trim()
+Write-Host "  Retrieving Function App key..." -ForegroundColor Gray
+$funcKeyOutput = az functionapp keys list -g $RESOURCE_GROUP -n $FUNCTION_APP_NAME --query "functionKeys.default" -o tsv 2>&1
+if ($LASTEXITCODE -ne 0 -or -not $funcKeyOutput) {
+    Write-Host "  WARNING: Could not retrieve Function App key (public access may be disabled)." -ForegroundColor Red
+    Write-Host "  You can retrieve it manually later:" -ForegroundColor Red
+    Write-Host "    az functionapp keys list -g $RESOURCE_GROUP -n $FUNCTION_APP_NAME --query functionKeys.default -o tsv" -ForegroundColor Red
+    Write-Host "  Continuing with placeholder..." -ForegroundColor Red
+    $FUNCTION_KEY = "REPLACE_WITH_FUNCTION_KEY"
+} else {
+    $FUNCTION_KEY = "$funcKeyOutput".Trim()
+}
 
 # Get SharePoint connection details
-$SUBSCRIPTION_ID = (az account show --query id -o tsv).Trim()
-$SP_CONNECTION_RUNTIME_URL = (az resource show -g $RESOURCE_GROUP --resource-type "Microsoft.Web/connections" -n $SHAREPOINT_CONNECTION --query "properties.connectionRuntimeUrl" -o tsv).Trim()
-$SP_CONNECTION_ID = (az resource show -g $RESOURCE_GROUP --resource-type "Microsoft.Web/connections" -n $SHAREPOINT_CONNECTION --query id -o tsv).Trim()
-$MANAGED_API_ID = (az resource show -g $RESOURCE_GROUP --resource-type "Microsoft.Web/connections" -n $SHAREPOINT_CONNECTION --query "properties.api.id" -o tsv).Trim()
+$SUBSCRIPTION_ID = "$((az account show --query id -o tsv))".Trim()
+$SP_CONNECTION_RUNTIME_URL = "$((az resource show -g $RESOURCE_GROUP --resource-type 'Microsoft.Web/connections' -n $SHAREPOINT_CONNECTION --query 'properties.connectionRuntimeUrl' -o tsv))".Trim()
+$SP_CONNECTION_ID = "$((az resource show -g $RESOURCE_GROUP --resource-type 'Microsoft.Web/connections' -n $SHAREPOINT_CONNECTION --query id -o tsv))".Trim()
+$MANAGED_API_ID = "$((az resource show -g $RESOURCE_GROUP --resource-type 'Microsoft.Web/connections' -n $SHAREPOINT_CONNECTION --query 'properties.api.id' -o tsv))".Trim()
 
 # Create workflow directory structure
 $WORKFLOW_DIR = Join-Path $env:TEMP "logic-app-workflow-$PID"
@@ -276,7 +286,7 @@ New-Item -ItemType Directory -Path $WORKFLOW_TRIGGER_DIR -Force | Out-Null
 $FUNC_HOSTNAME = (az deployment group show -g $RESOURCE_GROUP -n main --query "properties.outputs.functionAppUrl.value" -o tsv 2>$null)
 if ($FUNC_HOSTNAME) { $FUNC_HOSTNAME = $FUNC_HOSTNAME.Trim() -replace '^https://', '' }
 if (-not $FUNC_HOSTNAME) {
-    $FUNC_HOSTNAME = (az functionapp show -g $RESOURCE_GROUP -n $FUNCTION_APP_NAME --query "defaultHostName" -o tsv).Trim()
+    $FUNC_HOSTNAME = "$((az functionapp show -g $RESOURCE_GROUP -n $FUNCTION_APP_NAME --query 'defaultHostName' -o tsv))".Trim()
 }
 $SP_SITE_URL = $SHAREPOINT_SITE_URL
 $SP_LIBRARY_ID = $SHAREPOINT_LIBRARY_ID
