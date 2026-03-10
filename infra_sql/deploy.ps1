@@ -172,20 +172,33 @@ if ($StartFromStep -le 2) {
 # Extract outputs from existing deployment (needed by Steps 3-4 regardless of skip)
 Write-Host "  Extracting deployment outputs..." -ForegroundColor Yellow
 $deploymentJson = az deployment group show -g $RESOURCE_GROUP -n main -o json 2>&1
-if ($LASTEXITCODE -ne 0) {
-    Write-Host "  Could not find deployment 'main'. Listing all deployments:" -ForegroundColor Red
-    az deployment group list -g $RESOURCE_GROUP --query '[].{name:name, state:properties.provisioningState}' -o table
-    throw "Deployment 'main' not found. Check the table above for the actual deployment name/state."
+if ($LASTEXITCODE -eq 0) {
+    $deployment = $deploymentJson | ConvertFrom-Json
+    $FUNCTION_APP_NAME = $deployment.properties.outputs.functionAppName.value
+    $SQL_SERVER = $deployment.properties.outputs.sqlServerFqdn.value
+    $SQL_DATABASE = $deployment.properties.outputs.sqlDatabaseName.value
+    $STORAGE_ACCOUNT = $deployment.properties.outputs.storageAccountName.value
 }
 
-$deployment = $deploymentJson | ConvertFrom-Json
-$FUNCTION_APP_NAME = $deployment.properties.outputs.functionAppName.value
-$SQL_SERVER = $deployment.properties.outputs.sqlServerFqdn.value
-$SQL_DATABASE = $deployment.properties.outputs.sqlDatabaseName.value
-$STORAGE_ACCOUNT = $deployment.properties.outputs.storageAccountName.value
+# If deployment outputs are empty (e.g. last deploy failed), discover resources directly
+if (-not $FUNCTION_APP_NAME) {
+    Write-Host "  Deployment outputs empty (prior deploy may have failed). Discovering resources directly..." -ForegroundColor Yellow
+    $uniqueSuffix = (az group show -n $RESOURCE_GROUP --query "id" -o tsv | ForEach-Object {
+        # Replicate Bicep's uniqueString(resourceGroup().id) — not possible exactly,
+        # so we look up resources by naming convention instead.
+    })
+
+    # Query by resource type and naming pattern from config
+    $resourcePrefix = "$BASE_NAME-$ENVIRONMENT"
+    $FUNCTION_APP_NAME = (az functionapp list -g $RESOURCE_GROUP --query "[?starts_with(name,'$resourcePrefix-func')].name | [0]" -o tsv).Trim()
+    $STORAGE_ACCOUNT = (az storage account list -g $RESOURCE_GROUP --query "[?starts_with(name,'$($BASE_NAME)$($ENVIRONMENT)')].name | [0]" -o tsv).Trim()
+    $sqlServerName = (az sql server list -g $RESOURCE_GROUP --query "[?starts_with(name,'$resourcePrefix-sql')].name | [0]" -o tsv).Trim()
+    $SQL_SERVER = if ($sqlServerName) { "$sqlServerName.database.windows.net" } else { "" }
+    $SQL_DATABASE = "contractsdb"
+}
 
 if (-not $FUNCTION_APP_NAME) {
-    throw "Deployment outputs are empty - the Bicep deployment may have failed. Check Azure Portal -> Resource Group -> Deployments."
+    throw "Could not find Function App in resource group '$RESOURCE_GROUP'. Ensure Step 2 completed at least once successfully."
 }
 Write-Host "  Function App: $FUNCTION_APP_NAME" -ForegroundColor Gray
 Write-Host "  Storage:      $STORAGE_ACCOUNT" -ForegroundColor Gray
@@ -225,9 +238,18 @@ if ($StartFromStep -le 3) {
     Write-Host "`nStep 3: SKIPPED (Function App code)" -ForegroundColor DarkGray
 }
 
-# Extract Logic App name for final output
-$LOGIC_APP_NAME = (az deployment group show -g $RESOURCE_GROUP -n main --query "properties.outputs.logicAppName.value" -o tsv).Trim()
-$SHAREPOINT_CONNECTION = (az deployment group show -g $RESOURCE_GROUP -n main --query "properties.outputs.sharePointConnectionName.value" -o tsv).Trim()
+# Extract Logic App name and SharePoint connection for Step 4
+$resourcePrefix = "$BASE_NAME-$ENVIRONMENT"
+$LOGIC_APP_NAME = (az deployment group show -g $RESOURCE_GROUP -n main --query "properties.outputs.logicAppName.value" -o tsv 2>$null).Trim()
+$SHAREPOINT_CONNECTION = (az deployment group show -g $RESOURCE_GROUP -n main --query "properties.outputs.sharePointConnectionName.value" -o tsv 2>$null).Trim()
+
+# Fallback: discover from resource group if deployment outputs are empty
+if (-not $LOGIC_APP_NAME) {
+    $LOGIC_APP_NAME = (az resource list -g $RESOURCE_GROUP --resource-type "Microsoft.Web/sites" --query "[?kind=='functionapp,linux,workflowapp'].name | [0]" -o tsv).Trim()
+}
+if (-not $SHAREPOINT_CONNECTION) {
+    $SHAREPOINT_CONNECTION = (az resource list -g $RESOURCE_GROUP --resource-type "Microsoft.Web/connections" --query "[?starts_with(name,'$resourcePrefix')].name | [0]" -o tsv).Trim()
+}
 
 # ============================================================================
 # Step 4: Deploy Logic App Standard workflow
@@ -249,7 +271,10 @@ $WORKFLOW_TRIGGER_DIR = Join-Path $WORKFLOW_DIR "contract-trigger"
 New-Item -ItemType Directory -Path $WORKFLOW_TRIGGER_DIR -Force | Out-Null
 
 # Get app settings values
-$FUNC_HOSTNAME = (az deployment group show -g $RESOURCE_GROUP -n main --query "properties.outputs.functionAppUrl.value" -o tsv).Trim() -replace '^https://', ''
+$FUNC_HOSTNAME = (az deployment group show -g $RESOURCE_GROUP -n main --query "properties.outputs.functionAppUrl.value" -o tsv 2>$null).Trim() -replace '^https://', ''
+if (-not $FUNC_HOSTNAME) {
+    $FUNC_HOSTNAME = (az functionapp show -g $RESOURCE_GROUP -n $FUNCTION_APP_NAME --query "defaultHostName" -o tsv).Trim()
+}
 $SP_SITE_URL = $SHAREPOINT_SITE_URL
 $SP_LIBRARY_ID = $SHAREPOINT_LIBRARY_ID
 
