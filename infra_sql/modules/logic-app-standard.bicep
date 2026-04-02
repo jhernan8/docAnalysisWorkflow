@@ -59,6 +59,23 @@ resource sharePointConnection 'Microsoft.Web/connections@2016-06-01' = {
   }
 }
 
+// Access Policy: Allow Logic App's MSI to invoke the SharePoint API Connection
+// Without this, ManagedServiceIdentity auth in connections.json cannot call dynamicInvoke
+resource sharePointConnectionAccessPolicy 'Microsoft.Web/connections/accessPolicies@2016-06-01' = {
+  parent: sharePointConnection
+  name: '${logicAppName}-access-policy'
+  location: location
+  properties: {
+    principal: {
+      type: 'ActiveDirectory'
+      identity: {
+        tenantId: tenant().tenantId
+        objectId: logicApp.identity.principalId
+      }
+    }
+  }
+}
+
 // Logic App Standard
 resource logicApp 'Microsoft.Web/sites@2023-12-01' = {
   name: logicAppName
@@ -87,7 +104,7 @@ resource logicApp 'Microsoft.Web/sites@2023-12-01' = {
         }
         {
           name: 'FUNCTIONS_EXTENSION_VERSION'
-          value: '~4'
+          value: '4.14.0.19631'
         }
         {
           name: 'FUNCTIONS_WORKER_RUNTIME'

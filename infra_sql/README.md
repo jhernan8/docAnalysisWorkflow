@@ -154,47 +154,26 @@ az ad signed-in-user show --query id -o tsv
 
 ## Quick Start
 
-### Option 1: Using the deploy script
+### Using the PowerShell deployment scripts
 
-Requires an existing VNet and Private DNS Zones (can be in a different subscription).
+Deployment is split into three scripts that should be run in order. All scripts load shared configuration from `deploy.config.ps1`.
 
-```bash
+```powershell
 cd infra_sql
-chmod +x deploy.sh
-./deploy.sh
+
+# 1. Edit deploy.config.ps1 with your settings (resource group, networking, SharePoint, etc.)
+
+# 2. Deploy infrastructure and RBAC role assignments
+.\deployInfraRBAC.ps1
+
+# 3. Publish Function App code
+.\functionAppPublish.ps1
+
+# 4. Deploy Logic App workflow definition
+.\logicAppWorkflow.ps1
 ```
 
-### Option 2: Manual deployment
-
-```bash
-# 1. Create resource group
-az group create --name contract-analysis-rg --location eastus
-
-# 2. Get your Azure AD Object ID
-az ad signed-in-user show --query id -o tsv
-
-# 3. Deploy infrastructure
-az deployment group create \
-  --resource-group contract-analysis-rg \
-  --template-file main.bicep \
-  --parameters baseName=contracts \
-  --parameters environment=dev \
-  --parameters sqlAadAdminObjectId='your-object-id' \
-  --parameters sqlAadAdminDisplayName='your@email.com' \
-  --parameters sharePointSiteUrl='https://contoso.sharepoint.com/sites/ContractAI' \
-  --parameters sharePointLibraryId='your-library-guid' \
-  --parameters vnetName='cai-a1-tst-vnet-spoke01' \
-  --parameters vnetResourceGroupName='your-vnet-rg' \
-  --parameters privateEndpointSubnetAddressPrefix='10.0.4.0/24' \
-  --parameters vnetIntegrationSubnetAddressPrefix='10.0.5.0/24' \
-  --parameters logicAppSubnetAddressPrefix='10.0.6.0/24' \
-  --parameters dnsZoneSubscriptionId='your-dns-sub-id' \
-  --parameters dnsZoneResourceGroupName='your-dns-rg'
-
-# 4. Deploy function code
-cd ../azure_function_sql
-func azure functionapp publish <function-app-name> --python
-```
+> **Tip:** Each script can be re-run independently. For example, re-run `functionAppPublish.ps1` after updating function code without redeploying infrastructure.
 
 ## Post-Deployment Steps
 
@@ -241,9 +220,11 @@ ALTER ROLE db_datawriter ADD MEMBER [<function-app-name>];
 
 Upload a PDF contract to your SharePoint document library.
 
-## What the Deploy Script Does
+## What the Deployment Scripts Do
 
-The `deploy.sh` script automates the full deployment:
+Deployment is split into three PowerShell scripts (all load settings from `deploy.config.ps1`):
+
+### `deployInfraRBAC.ps1` — Infrastructure & RBAC
 
 1. ✅ Creates the resource group
 2. ✅ Deploys all Azure resources via Bicep
@@ -251,11 +232,18 @@ The `deploy.sh` script automates the full deployment:
 4. ✅ Deploys private endpoints (Storage blob/file/queue/table, SQL, Function App, Logic App)
 5. ✅ Registers endpoints with cross-subscription Private DNS Zones
 6. ✅ Disables public network access on Storage, SQL, Function App, and Logic App
-7. ✅ Deploys the Function App code (temporarily enables storage public access)
-8. ✅ Deploys Logic App Standard workflow definition via zip deploy
-9. ✅ Configures all RBAC permissions
+7. ✅ Configures all RBAC permissions
 
-**Remaining manual steps after running the script:**
+### `functionAppPublish.ps1` — Function App Code
+
+8. ✅ Deploys the Function App code via ARM zip deploy (temporarily enables storage public access)
+
+### `logicAppWorkflow.ps1` — Logic App Workflow
+
+9. ✅ Retrieves Function App key
+10. ✅ Deploys Logic App Standard workflow definition via zip deploy
+
+**Remaining manual steps after running all three scripts:**
 
 - Create Content Understanding analyzer and update Function App settings
 - Authorize the SharePoint connection in Azure Portal

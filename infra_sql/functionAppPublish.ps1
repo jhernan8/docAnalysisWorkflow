@@ -70,6 +70,7 @@ Write-Host "  Configuring remote build settings..." -ForegroundColor Gray
 az functionapp config appsettings set -g $RESOURCE_GROUP -n $FUNCTION_APP_NAME --settings `
     ENABLE_ORYX_BUILD=true `
     SCM_DO_BUILD_DURING_DEPLOYMENT=true `
+    AzureWebJobsFeatureFlags=EnableWorkerIndexing `
     --output none
 
 # Temporarily enable storage public access for deployment
