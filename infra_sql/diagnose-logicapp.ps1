@@ -520,39 +520,66 @@ if ($DNS_ZONE_SUBSCRIPTION_ID -and $DNS_ZONE_RESOURCE_GROUP) {
     Write-Host ""
 
     foreach ($zone in $dnsZones) {
+        $zoneRG = $DNS_ZONE_RESOURCE_GROUP
+        $foundInDifferentRG = $false
+
         # List VNet links for this zone
         $linksRaw = az network private-dns link vnet list `
             --subscription $DNS_ZONE_SUBSCRIPTION_ID `
-            -g $DNS_ZONE_RESOURCE_GROUP `
+            -g $zoneRG `
             -z $zone -o json 2>$null
         $linksExitCode = $LASTEXITCODE
 
         if ($linksExitCode -ne 0 -or -not $linksRaw) {
-            # Distinguish between "zone not found" and "no permission"
-            $errOutput = az network private-dns zone show `
+            # Zone not found in configured RG — search the entire subscription
+            Write-Host "        Zone not found in $zoneRG, searching subscription..." -ForegroundColor DarkGray
+            $searchRaw = az network private-dns zone list `
                 --subscription $DNS_ZONE_SUBSCRIPTION_ID `
-                -g $DNS_ZONE_RESOURCE_GROUP `
-                -n $zone -o json 2>&1
-            $zoneExitCode = $LASTEXITCODE
+                --query "[?name=='$zone'].{name:name, rg:resourceGroup}" -o json 2>$null
 
-            if ($zoneExitCode -ne 0) {
-                $errString = ($errOutput | Out-String)
+            if ($LASTEXITCODE -ne 0 -or -not $searchRaw) {
+                $errString = ($searchRaw | Out-String) + (az network private-dns zone list --subscription $DNS_ZONE_SUBSCRIPTION_ID -o none 2>&1 | Out-String)
                 if ($errString -match "AuthorizationFailed|does not have authorization|Forbidden|authorization") {
-                    Write-PermissionError "Read DNS Zone '$zone'" "Reader on subscription '$DNS_ZONE_SUBSCRIPTION_ID' (Microsoft.Network/privateDnsZones/read, Microsoft.Network/privateDnsZones/virtualNetworkLinks/read)"
+                    Write-PermissionError "Read DNS Zone '$zone'" "Reader on subscription '$DNS_ZONE_SUBSCRIPTION_ID' (Microsoft.Network/privateDnsZones/read)"
                 } else {
-                    Write-Check "DNS Zone: $zone" "NOT FOUND" -Severity "FAIL" `
-                        -Detail "Zone does not exist in $DNS_ZONE_RESOURCE_GROUP"
-                    Add-Issue "CRITICAL" "Private DNS Zone '$zone' not found in $DNS_ZONE_RESOURCE_GROUP" "The DNS team must create this zone"
+                    Write-Check "DNS Zone: $zone" "NOT FOUND in subscription" -Severity "FAIL" `
+                        -Detail "Zone does not exist in configured RG '$zoneRG' or anywhere in subscription $DNS_ZONE_SUBSCRIPTION_ID"
+                    Add-Issue "CRITICAL" "Private DNS Zone '$zone' not found" "The DNS team must create this zone"
                 }
-            } else {
-                Write-PermissionError "List VNet links on '$zone'" "Reader on DNS Zone (Microsoft.Network/privateDnsZones/virtualNetworkLinks/read)"
+                continue
             }
-            continue
+
+            $searchResults = $searchRaw | ConvertFrom-Json
+            if (-not $searchResults -or $searchResults.Count -eq 0) {
+                Write-Check "DNS Zone: $zone" "NOT FOUND in subscription" -Severity "FAIL" `
+                    -Detail "Zone does not exist in configured RG '$zoneRG' or anywhere in subscription $DNS_ZONE_SUBSCRIPTION_ID"
+                Add-Issue "CRITICAL" "Private DNS Zone '$zone' not found" "The DNS team must create this zone"
+                continue
+            }
+
+            # Found in a different RG
+            $zoneRG = $searchResults[0].rg
+            $foundInDifferentRG = $true
+            Write-Host "        Found in resource group: $zoneRG" -ForegroundColor Yellow
+
+            # Retry with the correct RG
+            $linksRaw = az network private-dns link vnet list `
+                --subscription $DNS_ZONE_SUBSCRIPTION_ID `
+                -g $zoneRG `
+                -z $zone -o json 2>$null
+            $linksExitCode = $LASTEXITCODE
+
+            if ($linksExitCode -ne 0 -or -not $linksRaw) {
+                Write-PermissionError "List VNet links on '$zone' in $zoneRG" "Reader on DNS Zone (Microsoft.Network/privateDnsZones/virtualNetworkLinks/read)"
+                continue
+            }
         }
 
         $links = $linksRaw | ConvertFrom-Json
+        $rgNote = if ($foundInDifferentRG) { " (in RG: $zoneRG — NOT the configured RG)" } else { "" }
+
         if (-not $links -or $links.Count -eq 0) {
-            Write-Check "DNS Zone: $zone" "NO VNET LINKS" -Severity "FAIL" `
+            Write-Check "DNS Zone: $zone" "NO VNET LINKS$rgNote" -Severity "FAIL" `
                 -Detail "Zone exists but has no VNet links at all"
             Add-Issue "CRITICAL" "DNS Zone '$zone' has no VNet links" "The other team must create a VNet link to $VNET_NAME"
             continue
@@ -568,14 +595,18 @@ if ($DNS_ZONE_SUBSCRIPTION_ID -and $DNS_ZONE_RESOURCE_GROUP) {
 
         if ($ourLink) {
             $regEnabled = $ourLink.registrationEnabled
-            Write-Check "DNS Zone: $zone" "LINKED to $VNET_NAME (registration=$regEnabled)" -Severity "PASS"
+            Write-Check "DNS Zone: $zone" "LINKED to $VNET_NAME (registration=$regEnabled)$rgNote" -Severity "PASS"
         } elseif (-not $vnetId) {
-            Write-Check "DNS Zone: $zone" "EXISTS (could not verify VNet link — VNet lookup failed)" -Severity "WARN" `
+            Write-Check "DNS Zone: $zone" "EXISTS (could not verify VNet link — VNet lookup failed)$rgNote" -Severity "WARN" `
                 -Detail "Existing links: $linkNames"
         } else {
-            Write-Check "DNS Zone: $zone" "NOT LINKED to $VNET_NAME" -Severity "FAIL" `
+            Write-Check "DNS Zone: $zone" "NOT LINKED to $VNET_NAME$rgNote" -Severity "FAIL" `
                 -Detail "Existing links: $linkNames"
             Add-Issue "CRITICAL" "DNS Zone '$zone' is not linked to VNet '$VNET_NAME'" "Request the DNS team to add a VNet link for $VNET_NAME to this zone"
+        }
+
+        if ($foundInDifferentRG) {
+            Add-Issue "WARN" "DNS Zone '$zone' is in RG '$zoneRG', not the configured '$DNS_ZONE_RESOURCE_GROUP'" "Update DNS_ZONE_RESOURCE_GROUP in deploy.config.ps1, or note that zones may be spread across multiple RGs"
         }
     }
 } else {
