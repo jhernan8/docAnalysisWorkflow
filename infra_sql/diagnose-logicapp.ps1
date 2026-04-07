@@ -120,14 +120,28 @@ $resourcePrefix = "$BASE_NAME-$ENVIRONMENT"
 
 # Try deployment outputs first, fall back to query
 $deployment = Invoke-AzSafe @('deployment', 'group', 'show', '-g', $RESOURCE_GROUP, '-n', 'main', '-o', 'json')
-if ($deployment) {
+$usedDeploymentOutputs = $false
+if ($deployment -and $deployment.properties.outputs) {
     $LOGIC_APP_NAME      = $deployment.properties.outputs.logicAppName.value
     $FUNCTION_APP_NAME   = $deployment.properties.outputs.functionAppName.value
     $STORAGE_ACCOUNT     = $deployment.properties.outputs.storageAccountName.value
     $SP_CONNECTION_NAME  = $deployment.properties.outputs.sharePointConnectionName.value
-    Write-Host "  Loaded from deployment outputs" -ForegroundColor DarkGray
-} else {
-    Write-Host "  Deployment outputs not available, discovering resources..." -ForegroundColor Yellow
+
+    # Validate — outputs may be empty if deployment failed partway through
+    if ($LOGIC_APP_NAME -and $STORAGE_ACCOUNT) {
+        $usedDeploymentOutputs = $true
+        Write-Host "  Loaded from deployment outputs" -ForegroundColor DarkGray
+    } else {
+        Write-Host "  Deployment 'main' found but outputs are empty (deployment may have failed)." -ForegroundColor Yellow
+        Write-Host "  Deployment state: $($deployment.properties.provisioningState)" -ForegroundColor Yellow
+        Write-Host "  Falling back to resource discovery..." -ForegroundColor Yellow
+    }
+}
+
+if (-not $usedDeploymentOutputs) {
+    if (-not $deployment) {
+        Write-Host "  No deployment named 'main' found, discovering resources..." -ForegroundColor Yellow
+    }
 
     $LOGIC_APP_NAME = (az resource list -g $RESOURCE_GROUP --resource-type 'Microsoft.Web/sites' --query "[?kind=='functionapp,linux,workflowapp'].name | [0]" -o tsv 2>$null)
     if ($LASTEXITCODE -ne 0) {
