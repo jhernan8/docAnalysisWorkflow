@@ -69,9 +69,9 @@ Write-Host "`n[Step 2] Checking Private Endpoint for Logic App..." -ForegroundCo
 $peName = "$resourcePrefix-pe-logic"
 $peCheck = az network private-endpoint show -g $RESOURCE_GROUP -n $peName -o json 2>$null
 if ($LASTEXITCODE -eq 0 -and $peCheck) {
-    Write-Host "  [OK] PE '$peName' exists — will auto-reconnect after redeploy" -ForegroundColor Green
+    Write-Host "  [OK] PE '$peName' exists - will auto-reconnect after redeploy" -ForegroundColor Green
 } else {
-    Write-Host "  [INFO] PE '$peName' not found — Bicep will create it" -ForegroundColor DarkGray
+    Write-Host "  [INFO] PE '$peName' not found - Bicep will create it" -ForegroundColor DarkGray
 }
 
 # ============================================================================
@@ -113,14 +113,28 @@ if ($SP_CONNECTION_NAME) {
     }
 }
 
-# Delete Logic App
+# Delete Logic App (with retry for ARM throttling / 429)
 if ($LOGIC_APP_NAME) {
     Write-Host "  Deleting Logic App '$LOGIC_APP_NAME'..." -ForegroundColor Gray
-    az webapp delete -g $RESOURCE_GROUP -n $LOGIC_APP_NAME --output none 2>$null
-    if ($LASTEXITCODE -eq 0) {
+    $maxRetries = 5
+    $retryDelay = 30
+    $deleted = $false
+    for ($attempt = 1; $attempt -le $maxRetries; $attempt++) {
+        az webapp delete -g $RESOURCE_GROUP -n $LOGIC_APP_NAME --output none 2>$null
+        if ($LASTEXITCODE -eq 0) {
+            $deleted = $true
+            break
+        }
+        if ($attempt -lt $maxRetries) {
+            Write-Host "  [RETRY] Attempt $attempt failed (likely 429 throttle). Waiting ${retryDelay}s..." -ForegroundColor Yellow
+            Start-Sleep -Seconds $retryDelay
+            $retryDelay = [math]::Min($retryDelay * 2, 120)
+        }
+    }
+    if ($deleted) {
         Write-Host "  [OK] Logic App deleted" -ForegroundColor Green
     } else {
-        Write-Host "  [WARN] Could not delete Logic App (may not exist)" -ForegroundColor Yellow
+        Write-Host "  [WARN] Could not delete Logic App after $maxRetries attempts" -ForegroundColor Yellow
     }
 }
 
