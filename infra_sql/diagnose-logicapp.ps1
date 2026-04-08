@@ -578,6 +578,43 @@ if ($DNS_ZONE_SUBSCRIPTION_ID -and $DNS_ZONE_RESOURCE_GROUP) {
         $links = $linksRaw | ConvertFrom-Json
         $rgNote = if ($foundInDifferentRG) { " (in RG: $zoneRG — NOT the configured RG)" } else { "" }
 
+        # If zone found in configured RG but has 0 links (or no link to our VNet),
+        # search other RGs — the correct zone may live elsewhere
+        $needsFallbackSearch = $false
+        if ((-not $links -or $links.Count -eq 0) -and -not $foundInDifferentRG) {
+            $needsFallbackSearch = $true
+        } elseif ($links -and $links.Count -gt 0 -and $vnetId -and -not $foundInDifferentRG) {
+            $ourLinkCheck = $links | Where-Object { $_.virtualNetwork.id -eq $vnetId }
+            if (-not $ourLinkCheck) { $needsFallbackSearch = $true }
+        }
+
+        if ($needsFallbackSearch) {
+            Write-Host "        Zone in $zoneRG has no link to $VNET_NAME, searching subscription for other instances..." -ForegroundColor DarkGray
+            $searchRaw = az network private-dns zone list `
+                --subscription $DNS_ZONE_SUBSCRIPTION_ID `
+                --query "[?name=='$zone'].{name:name, rg:resourceGroup}" -o json 2>$null
+            if ($LASTEXITCODE -eq 0 -and $searchRaw) {
+                $searchResults = ($searchRaw | ConvertFrom-Json) | Where-Object { $_.rg -ne $zoneRG }
+                foreach ($alt in $searchResults) {
+                    $altLinksRaw = az network private-dns link vnet list `
+                        --subscription $DNS_ZONE_SUBSCRIPTION_ID `
+                        -g $alt.rg -z $zone -o json 2>$null
+                    if ($LASTEXITCODE -eq 0 -and $altLinksRaw) {
+                        $altLinks = $altLinksRaw | ConvertFrom-Json
+                        $altOurLink = if ($vnetId) { $altLinks | Where-Object { $_.virtualNetwork.id -eq $vnetId } } else { $null }
+                        if ($altOurLink -or ($altLinks -and $altLinks.Count -gt 0)) {
+                            Write-Host "        Found better match in resource group: $($alt.rg)" -ForegroundColor Yellow
+                            $links = $altLinks
+                            $zoneRG = $alt.rg
+                            $foundInDifferentRG = $true
+                            $rgNote = " (in RG: $zoneRG — NOT the configured RG)"
+                            break
+                        }
+                    }
+                }
+            }
+        }
+
         if (-not $links -or $links.Count -eq 0) {
             Write-Check "DNS Zone: $zone" "NO VNET LINKS$rgNote" -Severity "FAIL" `
                 -Detail "Zone exists but has no VNet links at all"

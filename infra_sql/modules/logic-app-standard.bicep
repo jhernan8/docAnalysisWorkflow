@@ -103,6 +103,10 @@ resource logicApp 'Microsoft.Web/sites@2023-12-01' = {
           value: storageAccountName
         }
         {
+          name: 'WEBSITE_CONTENTOVERVNET'
+          value: !empty(virtualNetworkSubnetId) ? '1' : '0'
+        }
+        {
           name: 'FUNCTIONS_EXTENSION_VERSION'
           value: '4.14.0.19631'
         }
