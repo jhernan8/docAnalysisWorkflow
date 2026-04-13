@@ -39,7 +39,7 @@ resource appServicePlan 'Microsoft.Web/serverfarms@2023-12-01' = {
   }
   kind: 'elastic'
   properties: {
-    reserved: true // Linux
+    reserved: false // Windows
   }
 }
 
@@ -50,6 +50,7 @@ resource appServicePlan 'Microsoft.Web/serverfarms@2023-12-01' = {
 resource sharePointConnection 'Microsoft.Web/connections@2016-06-01' = {
   name: '${logicAppName}-sharepoint-connection'
   location: location
+  kind: 'V2'
   tags: tags
   properties: {
     displayName: 'SharePoint Connection for Contract Analysis'
@@ -81,13 +82,13 @@ resource logicApp 'Microsoft.Web/sites@2023-12-01' = {
   name: logicAppName
   location: location
   tags: union(tags, { 'hidden-link: /app-insights-resource-id': appInsightsConnectionString })
-  kind: 'functionapp,linux,workflowapp'
+  kind: 'functionapp,workflowapp'
   identity: {
     type: 'SystemAssigned'
   }
   properties: {
     serverFarmId: appServicePlan.id
-    reserved: true
+    reserved: false
     httpsOnly: true
     publicNetworkAccess: publicNetworkAccess
     virtualNetworkSubnetId: !empty(virtualNetworkSubnetId) ? virtualNetworkSubnetId : null
