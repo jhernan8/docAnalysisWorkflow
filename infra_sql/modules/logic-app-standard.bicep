@@ -97,7 +97,6 @@ resource logicApp 'Microsoft.Web/sites@2023-12-01' = {
       ftpsState: 'Disabled'
       minTlsVersion: '1.2'
       use32BitWorkerProcess: false
-      netFrameworkVersion: 'v6.0'
       appSettings: [
         {
           name: 'AzureWebJobsStorage__accountName'
@@ -109,15 +108,11 @@ resource logicApp 'Microsoft.Web/sites@2023-12-01' = {
         }
         {
           name: 'FUNCTIONS_EXTENSION_VERSION'
-          value: '4.14.0.19631'
+          value: '~4'
         }
         {
           name: 'FUNCTIONS_WORKER_RUNTIME'
-          value: 'node'
-        }
-        {
-          name: 'WEBSITE_NODE_DEFAULT_VERSION'
-          value: '~18'
+          value: 'dotnet'
         }
         {
           name: 'APPLICATIONINSIGHTS_CONNECTION_STRING'
