@@ -100,7 +100,7 @@ resource containerAppEnv 'Microsoft.App/managedEnvironments@2024-03-01' = {
   properties: {
     vnetConfiguration: {
       infrastructureSubnetId: subnet.outputs.subnetId
-      internal: false
+      internal: true
     }
     zoneRedundant: false
   }
@@ -124,7 +124,7 @@ resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
     managedEnvironmentId: containerAppEnv.id
     configuration: {
       ingress: {
-        external: true
+        external: false
         targetPort: 5000
         transport: 'auto'
         allowInsecure: false
@@ -195,6 +195,7 @@ output containerAppFqdn string = containerApp.properties.configuration.ingress.f
 output mcpEndpointUrl string = 'https://${containerApp.properties.configuration.ingress.fqdn}/mcp'
 output healthEndpointUrl string = 'https://${containerApp.properties.configuration.ingress.fqdn}/health'
 output containerAppPrincipalId string = containerApp.identity.principalId
+output containerAppEnvName string = containerAppEnv.name
 
 output postDeploymentSteps string = '''
 ================================================================================
@@ -207,29 +208,19 @@ POST-DEPLOYMENT STEPS:
    CREATE USER [contracts-mcp-server] FROM EXTERNAL PROVIDER;
    ALTER ROLE db_datareader ADD MEMBER [contracts-mcp-server];
 
-2. VERIFY HEALTH:
-   curl https://<containerAppFqdn>/health
+2. VERIFY HEALTH (from within the VNet or via az containerapp exec):
+   az containerapp exec -n contracts-mcp-server -g <rg> --command "curl http://localhost:5000/health"
 
-3. CONNECT FROM FOUNDRY AGENT (Portal — no code):
+3. CONNECT FROM FOUNDRY AGENT (Portal):
    a. Go to https://ai.azure.com → select your project → Playground
    b. Create or open an agent → Tools → Add → Custom → MCP
    c. Name: contracts-mcp
    d. Remote MCP Server endpoint: https://<containerAppFqdn>/mcp
-   e. Authentication: Unauthenticated
+   e. Authentication: Unauthenticated (network-level isolation)
    f. Require approval: never
 
-4. OR CONNECT VIA PYTHON SDK:
-   mcp_connection = McpToolConnection(
-       server_label="contracts-mcp",
-       server_url="https://<containerAppFqdn>/mcp",
-       server_type="sse"
-   )
-   agent = client.agents.create_agent(
-       model="gpt-4o", name="contract-analyst",
-       tool_resources=ToolConnectionList(mcp_tool_connections=[mcp_connection])
-   )
-
-5. OR CONNECT FROM VS CODE (.vscode/mcp.json):
-   { "mcpServers": { "contracts-mcp": { "type": "sse", "url": "https://<containerAppFqdn>/mcp" } } }
+4. NOTE: This MCP server uses internal-only ingress.
+   It is only reachable from within the VNet (private MCP endpoint).
+   Foundry Standard Agent Setup with private networking is required.
 ================================================================================
 '''
